@@ -1,0 +1,22 @@
+body {
+    font-family: sans-serif;
+    margin: 2em;
+    background: #f9f9f9;
+}
+h1 {
+    color: #333;
+}
+ul {
+    list-style: none;
+    padding: 0;
+}
+li {
+    margin-bottom: 0.5em;
+}
+a {
+    color: #0077cc;
+    text-decoration: none;
+}
+a:hover {
+    text-decoration: underline;
+} 

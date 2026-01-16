@@ -10,17 +10,24 @@
     <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
     <style>
-        #ocrResult h1 { font-size: 1.5rem; font-weight: bold; margin: 1em 0 0.5em 0; color: #1e293b; }
-        #ocrResult h2 { font-size: 1.25rem; font-weight: bold; margin: 1em 0 0.5em 0; color: #334155; }
-        #ocrResult h3 { font-size: 1.1rem; font-weight: bold; margin: 1em 0 0.5em 0; color: #475569; }
-        #ocrResult p { margin: 0.5em 0; color: #374151; }
-        #ocrResult ul, #ocrResult ol { margin: 0.5em 0 0.5em 1.5em; }
-        #ocrResult li { margin: 0.25em 0; }
-        #ocrResult pre { background: #f1f5f9; padding: 0.5em 1em; border-radius: 0.5em; overflow-x: auto; }
-        #ocrResult code { background: #f3f4f6; padding: 0.1em 0.3em; border-radius: 0.3em; }
-        #ocrResult blockquote { border-left: 4px solid #60a5fa; padding-left: 1em; color: #64748b; margin: 1em 0; }
-        #ocrResult img { max-width: 100%; border-radius: 0.5em; margin: 0.5em 0; }
-        #ocrResult hr { border: none; border-top: 1px solid #e5e7eb; margin: 1em 0; }
+        #ocrResult, .ocr-markdown {
+            font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+            font-size: 1rem;
+            line-height: 1.7;
+            color: #374151;
+        }
+        .ocr-markdown h1 { font-size: 1.5rem; font-weight: bold; margin: 1em 0 0.5em 0; color: #1e293b; }
+        .ocr-markdown h2 { font-size: 1.25rem; font-weight: bold; margin: 1em 0 0.5em 0; color: #334155; }
+        .ocr-markdown h3 { font-size: 1.1rem; font-weight: bold; margin: 1em 0 0.5em 0; color: #475569; }
+        .ocr-markdown p { margin: 0.5em 0; color: #374151; }
+        .ocr-markdown ul, .ocr-markdown ol { margin: 0.5em 0 0.5em 1.5em; }
+        .ocr-markdown li { margin: 0.25em 0; }
+        .ocr-markdown pre { background: #f1f5f9; padding: 0.5em 1em; border-radius: 0.5em; overflow-x: auto; }
+        .ocr-markdown code { background: #f3f4f6; padding: 0.1em 0.3em; border-radius: 0.3em; }
+        .ocr-markdown blockquote { border-left: 4px solid #60a5fa; padding-left: 1em; color: #64748b; margin: 1em 0; }
+        .ocr-markdown img { max-width: 100%; border-radius: 0.5em; margin: 0.5em 0; }
+        .ocr-markdown hr { border: none; border-top: 1px solid #e5e7eb; margin: 1em 0; }
+        .task-number { font-weight: bold; color: #2563eb; margin-right: 0.3em; }
         .spinner {
             width: 40px;
             height: 40px;
@@ -37,6 +44,124 @@
         }
     </style>
     <script>
+    marked.setOptions({
+        breaks: true, // \n -> <br>
+        gfm: true,
+        smartLists: true,
+        smartypants: true,
+    });
+    // Заменяем \n внутри $$...$$ на \\\ для KaTeX
+    function fixLatexNewlines(md) {
+        return md.replace(/\$\$([\s\S]*?)\$\$/g, (match, formula) => {
+            const fixed = formula.replace(/\n/g, ' \\\\n');
+            return `$$${fixed}$$`;
+        });
+    }
+    // Автоматически оборачиваем одиночные latex-конструкции в $...$ если они не внутри формулы
+    function autoWrapLatexInline(md) {
+        // Оборачиваем \\frac{...}{...}, \\sqrt{...}, \\sum, \\int, \\lim, \\log, \\sin, \\cos, \\tan и т.д.
+        // Только если не внутри $...$ или $$...$$
+        // Примитивно: ищем конструкции вне формул и оборачиваем
+        // Можно расширить список по необходимости
+        const latexPatterns = [
+            /\\frac\{[^}]+\}\{[^}]+\}/g,
+            /\\sqrt\{[^}]+\}/g,
+            /\\sum(_\{[^}]+\})?(\^\{[^}]+\})?/g,
+            /\\int(_\{[^}]+\})?(\^\{[^}]+\})?/g,
+            /\\lim(_\{[^}]+\})?/g,
+            /\\log/g,
+            /\\sin/g,
+            /\\cos/g,
+            /\\tan/g
+        ];
+        // Разбиваем на блоки: вне формул и внутри формул
+        return md.replace(/(\$\$[\s\S]*?\$\$|\$[^$]*\$|[^$]+)/g, (block) => {
+            if (block.startsWith('$$') || block.startsWith('$')) {
+                return block; // уже формула
+            } else {
+                let replaced = block;
+                for (const pattern of latexPatterns) {
+                    replaced = replaced.replace(pattern, m => `$${m}$`);
+                }
+                return replaced;
+            }
+        });
+    }
+    // Фильтр для приведения формул к KaTeX-friendly виду
+    function fixLatexForKaTeX(md) {
+        // 1. aligned -> array
+        md = md.replace(/\\begin{aligned}([\s\S]*?)\\end{aligned}/g, (match, content) => {
+            return '\\begin{array}{l}' + content + '\\end{array}';
+        });
+        // 1b. gathered/gather -> array
+        md = md.replace(/\\begin{gathered}([\s\S]*?)\\end{gathered}/g, (match, content) => {
+            return '\\begin{array}{l}' + content + '\\end{array}';
+        });
+        md = md.replace(/\\begin{gather}([\s\S]*?)\\end{gather}/g, (match, content) => {
+            return '\\begin{array}{l}' + content + '\\end{array}';
+        });
+        // 1c. auto-add \\ at end of each line in array (разбиваем по \n и по одинарному слэшу)
+        md = md.replace(/\\begin{array}{l}([\s\S]*?)\\end{array}/g, (match, content) => {
+            // Разбиваем по \n, а также по одинарному слэшу, если он стоит в конце строки
+            let lines = content
+                .replace(/\\\s*\n/g, '\n') // заменяем "\ \n" на просто "\n"
+                .split(/\n|(?<!\\)\s*\\\s*/)
+                .map(line => line.trim())
+                .filter(line => line.length > 0);
+            let fixed = lines.map((line, idx) => {
+                // Если строка уже заканчивается на \\, не добавляем ещё
+                if (line.endsWith('\\')) return line;
+                // Последняя строка — не добавляем \\
+                if (idx === lines.length - 1) return line;
+                return line + ' \\';
+            }).join(' ');
+            return '\\begin{array}{l}' + fixed + '\\end{array}';
+        });
+        // 2. Внутри формул: запятые на точки для чисел (например, 2,5 -> 2.5)
+        md = md.replace(/\$\$([\s\S]*?)\$\$/g, (match, formula) => {
+            let fixed = formula.replace(/(\d),(\d)/g, '$1.$2');
+            // 3. Удаляем лишние пробелы вокруг ; и :
+            fixed = fixed.replace(/\s*;\s*/g, '; ');
+            fixed = fixed.replace(/\s*:\s*/g, ': ');
+            // 4. Удаляем лишние \n внутри формулы (оставляем только для array)
+            fixed = fixed.replace(/([^\\])\n/g, '$1 ');
+            // 5. \in Z -> \in \\mathbb{Z}
+            fixed = fixed.replace(/\\in Z/g, '\\in \\mathbb{Z}');
+            // 6. Удаляем дефис перед \end{array}
+            fixed = fixed.replace(/-\s*\\end{array}/g, '\\end{array}');
+            // 7. Заменяем \\text{...} с русским текстом на просто текст
+            fixed = fixed.replace(/\\text\{([^}]*)\}/g, (m, txt) => {
+                if (/^[а-яА-ЯёЁ\s]+$/.test(txt)) return txt;
+                return '\\text{' + txt + '}';
+            });
+            return `$$${fixed}$$`;
+        });
+        return md;
+    }
+    // Фильтр для номеров задач: NN. ... -> <span class='task-number'>NN.</span> ...
+    function fixNumberedTasks(md) {
+        return md.replace(/^(\d{1,4})\.\s+/gm, (m, num) => `<span class="task-number">${num}.</span> `);
+    }
+    function renderMarkdown(target, markdown) {
+        target.classList.add('ocr-markdown');
+        // Фиксим формулы с переводами строк
+        markdown = fixLatexNewlines(markdown);
+        // Авто-оборачиваем latex-конструкции в $...$
+        markdown = autoWrapLatexInline(markdown);
+        // Приводим формулы к KaTeX-friendly виду
+        markdown = fixLatexForKaTeX(markdown);
+        // Фиксим номера задач
+        markdown = fixNumberedTasks(markdown);
+        target.innerHTML = marked.parse(markdown || '');
+        if (window.renderMathInElement) {
+            renderMathInElement(target, {
+                delimiters: [
+                    {left: '$$', right: '$$', display: true},
+                    {left: '$', right: '$', display: false}
+                ]
+            });
+        }
+    }
     document.addEventListener('DOMContentLoaded', () => {
         const file = "{{ file }}";
         let totalPages = 0;
@@ -61,15 +186,7 @@
                         if (data && Array.isArray(data) && data[0]?.payload?.pages?.[0]?.markdown) {
                             const markdown = data[0].payload.pages[0].markdown;
                             const ocrDiv = document.getElementById(`ocr-result-${page}`);
-                            ocrDiv.innerHTML = marked.parse(markdown);
-                            if (window.renderMathInElement) {
-                                renderMathInElement(ocrDiv, {
-                                    delimiters: [
-                                        {left: '$$', right: '$$', display: true},
-                                        {left: '$', right: '$', display: false}
-                                    ]
-                                });
-                            }
+                            renderMarkdown(ocrDiv, markdown);
                         }
                     });
             }
@@ -82,15 +199,7 @@
                     const resp = await fetch(`/ocr/${file}/${page}`, {method: 'POST'});
                     const data = await resp.json();
                     const ocrDiv = document.getElementById(`ocr-result-${page}`);
-                    ocrDiv.innerHTML = marked.parse(data.result || 'Ошибка');
-                    if (window.renderMathInElement) {
-                        renderMathInElement(ocrDiv, {
-                            delimiters: [
-                                {left: '$$', right: '$$', display: true},
-                                {left: '$', right: '$', display: false}
-                            ]
-                        });
-                    }
+                    renderMarkdown(ocrDiv, data.result || 'Ошибка');
                 } catch (e) {
                     document.getElementById(`ocr-result-${page}`).textContent = 'Ошибка';
                 }

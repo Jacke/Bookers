@@ -1,13 +1,11 @@
-use actix_web::{web, HttpResponse, Error};
-use crate::models::{PreviewParams, OcrResponse};
-use crate::services::{FileService, OcrProvider, MistralOcrProvider};
-use crate::config::Config;
+use actix_web::{web, Error, HttpResponse};
 use log::error;
-use crate::constants;
+
+use crate::models::{OcrResponse, PreviewParams};
+use crate::services::{FileService, MistralOcrProvider, OcrProvider};
 
 pub async fn perform_ocr(
     params: web::Path<PreviewParams>,
-    _config: web::Data<Config>,
     file_service: web::Data<FileService>,
 ) -> Result<HttpResponse, Error> {
     let preview_path = match file_service.generate_preview(&params.file, params.page) {
@@ -29,18 +27,14 @@ pub async fn perform_ocr(
     };
 
     let provider = MistralOcrProvider::new(api_key);
-    match provider.extract_text(
-        &preview_path.to_string_lossy(),
-        &params.file,
-        params.page
-    ).await {
+    match provider
+        .extract_text(&preview_path.to_string_lossy(), &params.file, params.page)
+        .await
+    {
         Ok((ocr_text, ocr_result)) => {
-            if let Err(e) = file_service.save_ocr_cache(
-                &params.file,
-                params.page,
-                provider.provider_id(),
-                ocr_result
-            ) {
+            if let Err(e) =
+                file_service.save_ocr_cache(&params.file, params.page, provider.provider_id(), ocr_result)
+            {
                 error!("Failed to save OCR cache: {}", e);
             }
             Ok(HttpResponse::Ok().json(OcrResponse { result: ocr_text }))
@@ -58,14 +52,7 @@ pub async fn get_ocr_cache(
     file_service: web::Data<FileService>,
 ) -> Result<HttpResponse, Error> {
     match file_service.get_ocr_cache(&params.file, params.page) {
-        Some(data) => Ok(HttpResponse::Ok()
-            .content_type("application/json")
-            .body(data)),
-        None => Ok(HttpResponse::NotFound().body(""))
+        Some(data) => Ok(HttpResponse::Ok().content_type("application/json").body(data)),
+        None => Ok(HttpResponse::NotFound().body("")),
     }
 }
-
-fn get_ocr_provider() -> Box<dyn OcrProvider> {
-    let api_key = std::env::var("MISTRAL_API_KEY").expect("MISTRAL_API_KEY not set");
-    Box::new(MistralOcrProvider::new(api_key))
-} 

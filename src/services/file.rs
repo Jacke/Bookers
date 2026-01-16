@@ -1,8 +1,8 @@
+use log::{error, info};
+use std::collections::HashMap;
+use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
-use std::fs;
-use log::{info, error};
-use crate::constants;
 
 #[derive(Clone)]
 pub struct FileService {
@@ -28,7 +28,7 @@ impl FileService {
         &self.resources_dir
     }
 
-    pub fn get_pdf_metadata(&self, file: &str) -> Result<std::collections::HashMap<String, String>, String> {
+    pub fn get_pdf_metadata(&self, file: &str) -> Result<HashMap<String, String>, String> {
         let file_path = self.resources_dir.join(file);
         info!("Getting metadata for file: {:?}", file_path);
 
@@ -43,10 +43,10 @@ impl FileService {
         }
 
         let metadata_str = String::from_utf8_lossy(&output.stdout);
-        let mut metadata = std::collections::HashMap::new();
-        
+        let mut metadata = HashMap::new();
+
         for line in metadata_str.lines() {
-            if let Some((key, value)) = line.split_once(":") {
+            if let Some((key, value)) = line.split_once(':') {
                 metadata.insert(key.trim().to_string(), value.trim().to_string());
             }
         }
@@ -56,7 +56,9 @@ impl FileService {
 
     pub fn generate_preview(&self, file: &str, page: u32) -> Result<PathBuf, String> {
         let file_path = self.resources_dir.join(file);
-        let preview_path = self.preview_dir.join(format!("{}_{}.png", file.replace("/", "_"), page));
+        let preview_path = self
+            .preview_dir
+            .join(format!("{}_{}.png", file.replace('/', "_"), page));
 
         if !preview_path.exists() {
             fs::create_dir_all(&self.preview_dir)
@@ -83,8 +85,17 @@ impl FileService {
         Ok(preview_path)
     }
 
-    pub fn save_ocr_cache(&self, file: &str, page: u32, provider_id: &str, result: serde_json::Value) -> Result<(), String> {
-        let ocr_cache_path = self.ocr_cache_dir.join(format!("{}_{}.ocr_cache", file.replace("/", "_"), page));
+    pub fn save_ocr_cache(
+        &self,
+        file: &str,
+        page: u32,
+        provider_id: &str,
+        result: serde_json::Value,
+    ) -> Result<(), String> {
+        let ocr_cache_path = self
+            .ocr_cache_dir
+            .join(format!("{}_{}.ocr_cache", file.replace('/', "_"), page));
+
         let ocr_cache_json = serde_json::json!([
             {
                 "provider": provider_id,
@@ -98,12 +109,15 @@ impl FileService {
         fs::write(
             &ocr_cache_path,
             serde_json::to_string_pretty(&ocr_cache_json)
-                .map_err(|e| format!("Failed to serialize OCR cache: {}", e))?
-        ).map_err(|e| format!("Failed to write OCR cache: {}", e))
+                .map_err(|e| format!("Failed to serialize OCR cache: {}", e))?,
+        )
+        .map_err(|e| format!("Failed to write OCR cache: {}", e))
     }
 
     pub fn get_ocr_cache(&self, file: &str, page: u32) -> Option<String> {
-        let ocr_cache_path = self.ocr_cache_dir.join(format!("{}_{}.ocr_cache", file.replace("/", "_"), page));
+        let ocr_cache_path = self
+            .ocr_cache_dir
+            .join(format!("{}_{}.ocr_cache", file.replace('/', "_"), page));
         fs::read_to_string(&ocr_cache_path).ok()
     }
-} 
+}

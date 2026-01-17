@@ -15,3 +15,9 @@
 
 # Output
 /output/
+
+# Resources (test data)
+resources/*.pdf
+resources/.preview/
+resources/.ocr_cache/
+*.pdf

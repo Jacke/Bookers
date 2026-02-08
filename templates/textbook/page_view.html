@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Page {{ page_number }} - {{ book.title }}</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <style>
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --text-primary: #c9d1d9;
+            --text-secondary: #8b949e;
+            --text-muted: #6e7681;
+            --accent-primary: #58a6ff;
+            --accent-secondary: #79c0ff;
+            --border-color: #30363d;
+            --success: #238636;
+            --warning: #d29922;
+            --shadow: rgba(0,0,0,0.4);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        @media (max-width: 900px) {
+            .container { grid-template-columns: 1fr; }
+        }
+
+        .header {
+            background: var(--bg-secondary);
+            padding: 20px 30px;
+            border-radius: 12px;
+            grid-column: 1 / -1;
+            border: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .breadcrumbs {
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-bottom: 10px;
+        }
+
+        .breadcrumbs a {
+            color: var(--accent-primary);
+            text-decoration: none;
+        }
+
+        h1 {
+            font-size: 24px;
+            color: var(--text-primary);
+        }
+
+        .actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: var(--accent-primary);
+            color: white;
+        }
+
+        .btn-secondary {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+        }
+
+        .btn:hover {
+            opacity: 0.9;
+            transform: translateY(-1px);
+        }
+
+        .panel {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+            overflow: hidden;
+        }
+
+        .panel-header {
+            background: var(--bg-tertiary);
+            padding: 15px 20px;
+            border-bottom: 1px solid var(--border-color);
+            font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .panel-content {
+            padding: 20px;
+        }
+
+        .pdf-preview {
+            width: 100%;
+            max-height: 600px;
+            object-fit: contain;
+            border-radius: 8px;
+        }
+
+        .problems-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .problem-item {
+            background: var(--bg-tertiary);
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 3px solid var(--accent-primary);
+            text-decoration: none;
+            color: inherit;
+            display: block;
+            transition: all 0.2s;
+        }
+
+        .problem-item:hover {
+            transform: translateX(5px);
+            border-color: var(--success);
+        }
+
+        .problem-number {
+            font-weight: bold;
+            color: var(--accent-primary);
+            margin-bottom: 5px;
+        }
+
+        .problem-content {
+            font-size: 14px;
+            color: var(--text-secondary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .sub-problem-item {
+            display: block;
+            padding: 4px 0;
+            font-size: 13px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            transition: all 0.2s;
+        }
+
+        .sub-problem-item:hover {
+            color: var(--accent-primary);
+            transform: translateX(3px);
+        }
+
+        .ocr-text {
+            background: var(--bg-tertiary);
+            padding: 15px;
+            border-radius: 8px;
+            font-family: 'Monaco', 'Consolas', monospace;
+            font-size: 13px;
+            white-space: pre-wrap;
+            max-height: 400px;
+            overflow-y: auto;
+            color: var(--text-secondary);
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-muted);
+        }
+
+        .nav-arrows {
+            display: flex;
+            gap: 10px;
+        }
+
+        .nav-arrow {
+            padding: 8px 16px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            color: var(--text-primary);
+            text-decoration: none;
+            font-size: 14px;
+        }
+
+        .nav-arrow:hover {
+            background: var(--accent-primary);
+            border-color: var(--accent-primary);
+        }
+
+        .nav-arrow.disabled {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div>
+                <div class="breadcrumbs">
+                    <a href="/">📚 Books</a> / 
+                    <a href="/textbook/book/{{ book_id }}/pages">{{ book.title }}</a> /
+                    <span>Page {{ page_number }}</span>
+                </div>
+                <h1>📄 Page {{ page_number }}</h1>
+            </div>
+            <div class="actions">
+                <div class="nav-arrows">
+                    <a href="/textbook/book/{{ book_id }}/page/{{ page_number - 1 }}" 
+                       class="nav-arrow {% if page_number <= 1 %}disabled{% endif %}">← Prev</a>
+                    <a href="/textbook/book/{{ book_id }}/page/{{ page_number + 1 }}" 
+                       class="nav-arrow">Next →</a>
+                </div>
+                <button id="ocr-btn" class="btn btn-primary" onclick="runOcr()">🔍 OCR This Page</button>
+                <a href="/textbook/book/{{ book_id }}/pages" class="btn btn-secondary">All Pages</a>
+            </div>
+        </div>
+
+        <!-- PDF Preview -->
+        <div class="panel">
+            <div class="panel-header">
+                <span>📄 PDF Preview</span>
+                <a href="{{ preview_path }}" target="_blank" class="btn btn-secondary" style="padding: 5px 10px; font-size: 12px;">Open Image</a>
+            </div>
+            <div class="panel-content">
+                <img src="{{ preview_path }}" 
+                     alt="Page {{ page_number }}"
+                     class="pdf-preview"
+                     onerror="this.parentElement.innerHTML='<div class=\'empty-state\'>🖼️ Preview not found</div>'">
+            </div>
+        </div>
+
+        <!-- Problems on this page -->
+        <div class="panel">
+            <div class="panel-header">
+                <span>✅ Problems on this page</span>
+                {% if problems %}
+                <span style="background: var(--success); color: white; padding: 2px 10px; border-radius: 12px; font-size: 12px;">{{ problems | length }}</span>
+                {% endif %}
+            </div>
+            <div class="panel-content">
+                {% if problems %}
+                <div class="problems-list">
+                    {% for problem in problems %}
+                    <a href="/textbook/problem/{{ problem.id }}" class="problem-item">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                            <div class="problem-number">Problem {{ problem.number }}</div>
+                            {% if problem.is_cross_page %}
+                            <span style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 2px 8px; border-radius: 10px; font-size: 10px;" title="Многостраничная задача">📑</span>
+                            {% endif %}
+                        </div>
+                        <div class="problem-content">{{ problem.content | safe }}</div>
+                        {% if problem.sub_problems %}
+                        <div style="margin-top: 10px; padding-left: 15px; border-left: 2px solid var(--border-color);">
+                            <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">Подзадачи:</div>
+                            {% for sub in problem.sub_problems %}
+                            <a href="/textbook/problem/{{ sub.id }}" style="display: block; padding: 3px 0; font-size: 13px; color: var(--text-secondary); text-decoration: none;">
+                                <span style="color: var(--accent-primary); font-weight: bold;">{{ sub.number }})</span>
+                                {{ sub.content | replace(from=sub.number ~ ')', to='') | safe }}
+                            </a>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                    </a>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="empty-state">
+                    <p>📝 No problems on this page yet</p>
+                    <p style="font-size: 13px; margin-top: 10px;">Run OCR on a problem from this page to extract tasks.</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- OCR Text (if exists) -->
+        {% if page and page.ocr_text %}
+        <div class="panel" style="grid-column: 1 / -1;">
+            <div class="panel-header">
+                <span>🔍 OCR Text</span>
+            </div>
+            <div class="panel-content">
+                <div class="ocr-text">{{ page.ocr_text }}</div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <script>
+        const bookId = '{{ book_id }}';
+        const pageNum = {{ page_number }};
+        
+        document.addEventListener("DOMContentLoaded", function() {
+            renderMathInElement(document.body, {
+                delimiters: [
+                    {left: '$$', right: '$$', display: true},
+                    {left: '$', right: '$', display: false}
+                ],
+                throwOnError: false
+            });
+            
+            // Check if OCR already exists
+            loadExistingOcr();
+        });
+        
+        // Load existing OCR if available
+        async function loadExistingOcr() {
+            try {
+                const response = await fetch(`/api/page_ocr/${bookId}/${pageNum}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.has_ocr) {
+                        document.getElementById('ocr-btn').innerHTML = '🔄 Regenerate OCR';
+                        document.getElementById('ocr-btn').classList.add('btn-secondary');
+                        document.getElementById('ocr-btn').classList.remove('btn-primary');
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to check OCR status:', e);
+            }
+        }
+        
+        // Run OCR on this page
+        async function runOcr() {
+            const btn = document.getElementById('ocr-btn');
+            btn.disabled = true;
+            btn.innerHTML = '⏳ Running OCR...';
+            
+            try {
+                // Step 1: Run OCR
+                const ocrResponse = await fetch(`/api/ocr_page/${bookId}.pdf/${pageNum}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ provider: 'mistral' })
+                });
+                
+                if (!ocrResponse.ok) {
+                    throw new Error('OCR failed');
+                }
+                
+                const ocrData = await ocrResponse.json();
+                
+                // Step 2: Parse problems from OCR text
+                btn.innerHTML = '🔍 Parsing problems...';
+                
+                const parseResponse = await fetch('/api/parse_problems', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        text: ocrData.text,
+                        book_id: bookId,
+                        page_number: pageNum
+                    })
+                });
+                
+                if (!parseResponse.ok) {
+                    throw new Error('Parsing failed');
+                }
+                
+                const parseData = await parseResponse.json();
+                
+                // Step 3: Create problems if found
+                if (parseData.problems && parseData.problems.length > 0) {
+                    btn.innerHTML = `💾 Creating ${parseData.problems.length} problems...`;
+                    
+                    // Get chapter info from first problem number
+                    const chapterNum = parseInt(parseData.problems[0].number) > 100 ? 
+                        Math.floor(parseInt(parseData.problems[0].number) / 100) : 1;
+                    
+                    const createResponse = await fetch('/api/problems/bulk_create', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            text: ocrData.text,
+                            book_id: bookId,
+                            chapter_id: `${bookId}:${chapterNum}`,
+                            chapter_num: chapterNum,
+                            page_number: pageNum
+                        })
+                    });
+                    
+                    if (!createResponse.ok) {
+                        throw new Error('Failed to create problems');
+                    }
+                    
+                    const createData = await createResponse.json();
+                    
+                    // Success! Reload page to show new problems
+                    btn.innerHTML = '✅ Done! Reloading...';
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1000);
+                } else {
+                    btn.innerHTML = '⚠️ No problems found';
+                    btn.disabled = false;
+                }
+                
+            } catch (error) {
+                console.error('OCR error:', error);
+                btn.innerHTML = '❌ Error: ' + error.message;
+                btn.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>

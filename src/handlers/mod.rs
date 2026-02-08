@@ -1,9 +1,21 @@
 pub mod index;
 pub mod metadata;
 pub mod ocr;
+pub mod page_ocr;
 pub mod preview;
+pub mod problems;
+pub mod textbook;
+pub mod batch;
+pub mod websocket;
+pub mod smart_features;
 
 pub use index::*;
 pub use metadata::*;
 pub use ocr::*;
-pub use preview::*; 
+pub use page_ocr::*;
+pub use preview::*;
+pub use problems::*;
+pub use textbook::*;
+pub use batch::*;
+pub use websocket::*;
+pub use smart_features::*;

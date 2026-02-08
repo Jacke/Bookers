@@ -1,3 +1,5 @@
+pub mod problem;
+
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fmt;
@@ -33,4 +35,7 @@ pub struct OcrResponse {
 #[derive(Debug, Serialize)]
 pub struct MetadataResponse {
     pub metadata: std::collections::HashMap<String, String>,
-} 
+}
+
+// Re-export problem models
+pub use problem::*; 

@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ chapter.title }} - Problems</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <style>
+        /* CSS Variables for theming */
+        :root {
+            --bg-primary: #f5f5f5;
+            --bg-secondary: #ffffff;
+            --bg-tertiary: #f0f0f0;
+            --text-primary: #333333;
+            --text-secondary: #666666;
+            --text-muted: #999999;
+            --accent-primary: #4a90d9;
+            --accent-secondary: #357abd;
+            --border-color: #e0e0e0;
+            --shadow: rgba(0,0,0,0.1);
+            --card-hover: #f8f9fa;
+            --solved: #28a745;
+            --unsolved: #ffc107;
+        }
+
+        [data-theme="dark"] {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --text-primary: #c9d1d9;
+            --text-secondary: #8b949e;
+            --text-muted: #6e7681;
+            --accent-primary: #58a6ff;
+            --accent-secondary: #79c0ff;
+            --border-color: #30363d;
+            --shadow: rgba(0,0,0,0.4);
+            --card-hover: #1c2128;
+            --solved: #238636;
+            --unsolved: #d29922;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root:not([data-theme="light"]) {
+                --bg-primary: #0d1117;
+                --bg-secondary: #161b22;
+                --bg-tertiary: #21262d;
+                --text-primary: #c9d1d9;
+                --text-secondary: #8b949e;
+                --text-muted: #6e7681;
+                --accent-primary: #58a6ff;
+                --accent-secondary: #79c0ff;
+                --border-color: #30363d;
+                --shadow: rgba(0,0,0,0.4);
+                --card-hover: #1c2128;
+                --solved: #238636;
+                --unsolved: #d29922;
+            }
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            color: var(--text-primary);
+            background: var(--bg-primary);
+            transition: background 0.3s, color 0.3s;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            background: var(--bg-secondary);
+            padding: 30px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+
+        .breadcrumbs {
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-bottom: 10px;
+        }
+
+        .breadcrumbs a {
+            color: var(--accent-primary);
+            text-decoration: none;
+        }
+
+        h1 {
+            font-size: 28px;
+            color: var(--text-primary);
+            margin-bottom: 10px;
+        }
+
+        .chapter-info {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .tab {
+            padding: 12px 24px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            color: var(--text-secondary);
+            transition: all 0.2s;
+        }
+
+        .tab.active {
+            background: var(--accent-primary);
+            color: white;
+            border-color: var(--accent-primary);
+        }
+
+        .tab:hover:not(.active) {
+            background: var(--bg-tertiary);
+        }
+
+        .content-section {
+            display: none;
+        }
+
+        .content-section.active {
+            display: block;
+        }
+
+        .problem-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+        }
+
+        .problem-card {
+            background: var(--bg-secondary);
+            padding: 25px;
+            border-radius: 12px;
+            border: 2px solid transparent;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-decoration: none;
+            color: inherit;
+            display: block;
+        }
+
+        .problem-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 24px var(--shadow);
+            background: var(--card-hover);
+        }
+
+        .problem-card.has-solution {
+            border-left-color: var(--solved);
+        }
+
+        .problem-card.no-solution {
+            border-left-color: var(--unsolved);
+        }
+
+        .problem-number {
+            font-size: 16px;
+            font-weight: bold;
+            color: var(--accent-primary);
+            margin-bottom: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .problem-preview {
+            font-size: 14px;
+            color: var(--text-secondary);
+            line-height: 1.6;
+            max-height: 120px;
+            overflow: hidden;
+            mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
+        }
+
+        .problem-meta {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid var(--border-color);
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .badge {
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .badge-solved {
+            background: rgba(35, 134, 54, 0.2);
+            color: var(--solved);
+        }
+
+        .badge-unsolved {
+            background: rgba(210, 153, 34, 0.2);
+            color: var(--unsolved);
+        }
+
+        .theory-list {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .theory-card {
+            background: var(--bg-secondary);
+            padding: 25px;
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+        }
+
+        .theory-type {
+            display: inline-block;
+            padding: 5px 14px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            margin-bottom: 15px;
+            letter-spacing: 0.5px;
+        }
+
+        .type-definition { background: rgba(88, 166, 255, 0.15); color: #58a6ff; }
+        .type-theorem { background: rgba(210, 153, 34, 0.15); color: #d29922; }
+        .type-property { background: rgba(35, 134, 54, 0.15); color: #3fb950; }
+        .type-formula { background: rgba(139, 148, 158, 0.15); color: #8b949e; }
+        .type-proof { background: rgba(248, 81, 73, 0.15); color: #f85149; }
+        .type-example { background: rgba(188, 140, 255, 0.15); color: #bc8cff; }
+
+        .theory-title {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 12px;
+            color: var(--text-primary);
+        }
+
+        .theory-content {
+            font-size: 15px;
+            line-height: 1.7;
+            color: var(--text-secondary);
+        }
+
+        .search-box {
+            width: 100%;
+            padding: 14px 20px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            font-size: 14px;
+            margin-bottom: 20px;
+            color: var(--text-primary);
+        }
+
+        .search-box:focus {
+            outline: none;
+            border-color: var(--accent-primary);
+        }
+
+        .search-box::placeholder {
+            color: var(--text-muted);
+        }
+
+        .stats {
+            display: flex;
+            gap: 30px;
+        }
+
+        .stat {
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 28px;
+            font-weight: bold;
+            color: var(--accent-primary);
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .theme-toggle {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 50%;
+            width: 44px;
+            height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 20px;
+            transition: all 0.2s;
+        }
+
+        .theme-toggle:hover {
+            background: var(--border-color);
+            transform: rotate(15deg);
+        }
+
+        /* KaTeX dark mode */
+        .katex {
+            color: var(--text-primary) !important;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 12px;
+            height: 12px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg-tertiary);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 6px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--text-muted);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div>
+                <div class="breadcrumbs">
+                    <a href="/">📚 Books</a> / 
+                    <span>Chapter {{ chapter.number }}</span>
+                </div>
+                <h1>{{ chapter.title }}</h1>
+                {% if chapter.description %}
+                <p class="chapter-info">{{ chapter.description }}</p>
+                {% endif %}
+                
+                <div class="stats">
+                    <div class="stat">
+                        <div class="stat-value">{{ problems | length }}</div>
+                        <div class="stat-label">Problems</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-value">{{ theory_blocks | length }}</div>
+                        <div class="stat-label">Theory</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-value">{{ solved_count | default(value=0) }}</div>
+                        <div class="stat-label">Solved</div>
+                    </div>
+                </div>
+            </div>
+            <button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode">
+                <span id="theme-icon">🌙</span>
+            </button>
+        </div>
+        
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab('problems')">
+                📋 Problems ({{ problems | length }})
+            </button>
+            <button class="tab" onclick="switchTab('theory')">
+                📚 Theory ({{ theory_blocks | length }})
+            </button>
+        </div>
+        
+        <!-- Problems Section -->
+        <div id="problems-section" class="content-section active">
+            <input type="text" class="search-box" placeholder="🔍 Search problems..." 
+                   onkeyup="searchProblems(this.value)">
+            
+            <div class="problem-grid" id="problem-grid">
+                {% for problem in problems %}
+                <a href="/textbook/problem/{{ problem.id }}" class="problem-card {% if problem.has_solution %}has-solution{% else %}no-solution{% endif %}">
+                    <div class="problem-number">
+                        <span>{{ problem.display_name }}</span>
+                        {% if problem.difficulty %}
+                        <span style="color: var(--unsolved);">
+                            {% for _ in range(end=problem.difficulty | default(value=0)) %}★{% endfor %}
+                        </span>
+                        {% endif %}
+                    </div>
+                    <div class="problem-preview">
+                        {{ problem.content }}
+                    </div>
+                    <div class="problem-meta">
+                        {% if problem.has_solution %}
+                        <span class="badge badge-solved">✓ Solved</span>
+                        {% else %}
+                        <span class="badge badge-unsolved">○ Unsolved</span>
+                        {% endif %}
+                        {% if problem.page_number %}
+                        <span>📄 Page {{ problem.page_number }}</span>
+                        {% endif %}
+                    </div>
+                </a>
+                {% endfor %}
+            </div>
+        </div>
+        
+        <!-- Theory Section -->
+        <div id="theory-section" class="content-section">
+            <div class="theory-list">
+                {% for theory in theory_blocks %}
+                <div class="theory-card">
+                    <span class="theory-type type-{{ theory.block_type | lower }}">
+                        {{ theory.block_type }}
+                    </span>
+                    {% if theory.title %}
+                    <div class="theory-title">{{ theory.title }}</div>
+                    {% endif %}
+                    <div class="theory-content">
+                        {{ theory.content | safe }}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <script>
+        // Theme management
+        function initTheme() {
+            const saved = localStorage.getItem('theme');
+            const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            const theme = saved || (prefersDark ? 'dark' : 'light');
+            document.documentElement.setAttribute('data-theme', theme);
+            updateThemeIcon(theme);
+        }
+
+        function toggleTheme() {
+            const current = document.documentElement.getAttribute('data-theme');
+            const next = current === 'dark' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', next);
+            localStorage.setItem('theme', next);
+            updateThemeIcon(next);
+        }
+
+        function updateThemeIcon(theme) {
+            document.getElementById('theme-icon').textContent = theme === 'dark' ? '☀️' : '🌙';
+        }
+
+        initTheme();
+
+        // KaTeX
+        document.addEventListener("DOMContentLoaded", function() {
+            renderMathInElement(document.body, {
+                delimiters: [
+                    {left: '$$', right: '$$', display: true},
+                    {left: '$', right: '$', display: false}
+                ],
+                throwOnError: false
+            });
+        });
+        
+        function switchTab(tab) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.content-section').forEach(s => s.classList.remove('active'));
+            
+            event.target.classList.add('active');
+            document.getElementById(tab + '-section').classList.add('active');
+        }
+        
+        function searchProblems(query) {
+            const cards = document.querySelectorAll('.problem-card');
+            const lowerQuery = query.toLowerCase();
+            
+            cards.forEach(card => {
+                const content = card.textContent.toLowerCase();
+                card.style.display = content.includes(lowerQuery) ? 'block' : 'none';
+            });
+        }
+    </script>
+</body>
+</html>

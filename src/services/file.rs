@@ -28,6 +28,14 @@ impl FileService {
         &self.resources_dir
     }
 
+    pub fn get_pdf_page_count(&self, file: &str) -> Result<u32, String> {
+        let metadata = self.get_pdf_metadata(file)?;
+        metadata
+            .get("Pages")
+            .and_then(|p| p.parse().ok())
+            .ok_or_else(|| "Could not parse page count".to_string())
+    }
+
     pub fn get_pdf_metadata(&self, file: &str) -> Result<HashMap<String, String>, String> {
         let file_path = self.resources_dir.join(file);
         info!("Getting metadata for file: {:?}", file_path);

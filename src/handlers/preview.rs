@@ -26,16 +26,21 @@ pub async fn get_preview_image(
     path: web::Path<PreviewImageParams>,
     file_service: web::Data<FileService>,
 ) -> Result<HttpResponse, Error> {
-    let preview_path = file_service
-        .get_preview_dir()
-        .join(format!("{}_{}.jpg", path.filename, path.page));
-
-    if !preview_path.exists() {
+    // Try PNG first, then JPG
+    let base_path = file_service.get_preview_dir();
+    let png_path = base_path.join(format!("{}_{}.png", path.filename, path.page));
+    let jpg_path = base_path.join(format!("{}_{}.jpg", path.filename, path.page));
+    
+    let (preview_path, content_type) = if png_path.exists() {
+        (png_path, "image/png")
+    } else if jpg_path.exists() {
+        (jpg_path, "image/jpeg")
+    } else {
         return Ok(HttpResponse::NotFound().body("Image not found"));
-    }
+    };
 
     match std::fs::read(&preview_path) {
-        Ok(data) => Ok(HttpResponse::Ok().content_type("image/jpeg").body(data)),
+        Ok(data) => Ok(HttpResponse::Ok().content_type(content_type).body(data)),
         Err(e) => {
             error!("Failed to read image file: {}", e);
             Ok(HttpResponse::InternalServerError().body("Failed to read image file"))

@@ -1,0 +1,1355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Problem {{ problem.number }} - {{ book_title }}</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <style>
+        :root {
+            --bg-primary: #f5f5f5;
+            --bg-secondary: #ffffff;
+            --bg-tertiary: #f0f0f0;
+            --text-primary: #333333;
+            --text-secondary: #666666;
+            --text-muted: #999999;
+            --accent-primary: #4a90d9;
+            --accent-secondary: #357abd;
+            --border-color: #e0e0e0;
+            --shadow: rgba(0,0,0,0.1);
+            --problem-bg: #f8f9fa;
+            --success: #28a745;
+            --warning: #ffc107;
+            --ocr-bg: #fff3cd;
+        }
+
+        [data-theme="dark"] {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --text-primary: #c9d1d9;
+            --text-secondary: #8b949e;
+            --text-muted: #6e7681;
+            --accent-primary: #58a6ff;
+            --accent-secondary: #79c0ff;
+            --border-color: #30363d;
+            --shadow: rgba(0,0,0,0.4);
+            --problem-bg: #1c2128;
+            --success: #238636;
+            --warning: #d29922;
+            --ocr-bg: #2d2a1e;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root:not([data-theme="light"]) {
+                --bg-primary: #0d1117;
+                --bg-secondary: #161b22;
+                --bg-tertiary: #21262d;
+                --text-primary: #c9d1d9;
+                --text-secondary: #8b949e;
+                --text-muted: #6e7681;
+                --accent-primary: #58a6ff;
+                --accent-secondary: #79c0ff;
+                --border-color: #30363d;
+                --shadow: rgba(0,0,0,0.4);
+                --problem-bg: #1c2128;
+                --success: #238636;
+                --warning: #d29922;
+                --ocr-bg: #2d2a1e;
+            }
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            color: var(--text-primary);
+            background: var(--bg-primary);
+            transition: background 0.3s, color 0.3s;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        @media (max-width: 900px) { .container { grid-template-columns: 1fr; } }
+
+        .header {
+            background: var(--bg-secondary);
+            padding: 20px;
+            border-radius: 12px;
+            grid-column: 1 / -1;
+            border: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .breadcrumbs {
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-bottom: 10px;
+        }
+
+        .breadcrumbs a {
+            color: var(--accent-primary);
+            text-decoration: none;
+        }
+
+        h1 {
+            font-size: 24px;
+            color: var(--text-primary);
+            margin: 0;
+        }
+
+        .problem-card {
+            background: var(--bg-secondary);
+            padding: 30px;
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+        }
+
+        .problem-number {
+            font-size: 18px;
+            font-weight: bold;
+            color: var(--accent-primary);
+            margin-bottom: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .problem-content {
+            font-size: 16px;
+            line-height: 1.8;
+            background: var(--problem-bg);
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid var(--accent-primary);
+            color: var(--text-primary);
+            margin-bottom: 20px;
+            white-space: pre-wrap;
+        }
+
+        /* Markdown Headers */
+        .problem-content h1, .problem-content h2, .problem-content h3,
+        .problem-content h4, .problem-content h5, .problem-content h6 {
+            margin: 20px 0 10px 0;
+            color: var(--accent-primary);
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 5px;
+        }
+        .problem-content h1 { font-size: 24px; }
+        .problem-content h2 { font-size: 20px; }
+        .problem-content h3 { font-size: 18px; }
+        .problem-content h4, .problem-content h5, .problem-content h6 { font-size: 16px; }
+
+        .sibling-problems {
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            border-left: 3px solid var(--success);
+        }
+
+        .sibling-problems a {
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            padding: 6px 14px;
+            border-radius: 16px;
+            font-size: 13px;
+            text-decoration: none;
+            border: 1px solid var(--border-color);
+            transition: all 0.2s;
+        }
+
+        .sibling-problems a:hover {
+            background: var(--accent-primary);
+            color: white;
+            border-color: var(--accent-primary);
+        }
+
+        .sibling-problems a.current {
+            background: var(--success);
+            color: white;
+            border-color: var(--success);
+        }
+
+        .sub-problems {
+            margin-top: 20px;
+            padding: 20px;
+            background: var(--bg-tertiary);
+            border-radius: 12px;
+            border-left: 4px solid var(--accent-primary);
+        }
+
+        .sub-problem {
+            display: flex;
+            gap: 15px;
+            padding: 15px;
+            margin-bottom: 10px;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            transition: all 0.2s;
+        }
+
+        .sub-problem:hover {
+            border-color: var(--accent-primary);
+            transform: translateX(5px);
+        }
+
+        .sub-problem-link:hover .sub-problem {
+            border-color: var(--accent-primary);
+            transform: translateX(5px);
+        }
+
+        .sub-problem-letter {
+            font-size: 18px;
+            font-weight: bold;
+            color: var(--accent-primary);
+            min-width: 30px;
+        }
+
+        .sub-problem-content {
+            flex: 1;
+            font-size: 15px;
+            line-height: 1.7;
+        }
+
+        .keyboard-nav {
+            user-select: none;
+        }
+
+        .keyboard-nav span {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .ocr-result {
+            background: var(--ocr-bg);
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid var(--warning);
+            margin-top: 20px;
+            display: none;
+        }
+
+        .ocr-result h4 {
+            margin: 0 0 10px 0;
+            color: var(--warning);
+        }
+
+        .ocr-text {
+            font-family: 'Monaco', 'Consolas', monospace;
+            font-size: 14px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            color: var(--text-primary);
+        }
+
+        .pdf-source {
+            background: var(--bg-secondary);
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .pdf-source h3 {
+            margin: 0 0 15px 0;
+            color: var(--text-secondary);
+            font-size: 16px;
+            border-bottom: 2px solid var(--border-color);
+            padding-bottom: 10px;
+        }
+
+        .pdf-image {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            min-height: 400px;
+            overflow: hidden;
+        }
+
+        .pdf-image img {
+            max-width: 100%;
+            max-height: 600px;
+            object-fit: contain;
+            box-shadow: 0 4px 20px var(--shadow);
+        }
+
+        .pdf-image .no-image {
+            color: var(--text-muted);
+            font-style: italic;
+            padding: 40px;
+            text-align: center;
+        }
+
+        .actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border-color);
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s;
+            font-weight: 500;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px var(--shadow);
+        }
+
+        .btn-primary {
+            background: var(--accent-primary);
+            color: white;
+        }
+
+        .btn-secondary {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+        }
+
+        .btn-warning {
+            background: var(--warning);
+            color: #000;
+        }
+
+        .btn-success {
+            background: var(--success);
+            color: white;
+        }
+
+        .solution-section {
+            background: var(--bg-secondary);
+            padding: 30px;
+            border-radius: 12px;
+            display: none;
+            grid-column: 1 / -1;
+            border: 1px solid var(--border-color);
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-secondary);
+        }
+
+        .error {
+            background: rgba(248, 81, 73, 0.1);
+            color: #f85149;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid rgba(248, 81, 73, 0.3);
+        }
+
+        .page-indicator {
+            background: var(--accent-primary);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .cross-page-indicator {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: help;
+        }
+
+        .theme-toggle {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 50%;
+            width: 44px;
+            height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 20px;
+        }
+
+        .katex { color: var(--text-primary) !important; }
+
+        ::-webkit-scrollbar {
+            width: 12px;
+            height: 12px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg-tertiary);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 6px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div>
+                <div class="breadcrumbs">
+                    <a href="/">📚 Books</a> / 
+                    {% if problem.page_number %}
+                    <a href="/textbook/book/{{ book_id }}/pages">Pages</a> / 
+                    <a href="/textbook/book/{{ book_id }}/page/{{ problem.page_number }}">Page {{ problem.page_number }}</a> / 
+                    {% endif %}
+                    {% if problem.parent_id %}
+                    <a href="/textbook/problem/{{ problem.parent_id }}">Parent</a> / 
+                    <span>{{ problem.number }})</span>
+                    {% else %}
+                    <span>Problem {{ problem.number }}</span>
+                    {% endif %}
+                </div>
+                <h1>{{ problem.display_name }}</h1>
+            </div>
+            <button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode">
+                <span id="theme-icon">🌙</span>
+            </button>
+        </div>
+        
+        <!-- Problem Text -->
+        <div class="problem-card">
+            <div class="problem-number">
+                {% if problem.parent_id %}
+                <span style="display: flex; align-items: center; gap: 8px;">
+                    <a href="/textbook/problem/{{ problem.parent_id }}" style="color: var(--accent-primary); text-decoration: none;">← Parent</a>
+                    <span style="color: var(--text-muted);">|</span>
+                    <span>Sub-problem {{ problem.number }})</span>
+                </span>
+                {% else %}
+                <span>Problem #{{ problem.number }}</span>
+                {% endif %}
+                {% if problem.page_number %}
+                <span class="page-indicator">📄 Page {{ problem.page_number }}</span>
+                {% endif %}
+                {% if problem.is_cross_page %}
+                <span class="cross-page-indicator" title="Эта задача продолжается на нескольких страницах">📑 Многостраничная</span>
+                {% endif %}
+            </div>
+            
+            <!-- Parent Problem Context (for sub-problems) -->
+            {% if parent_problem %}
+            <div class="parent-context" style="margin-bottom: 15px; padding: 15px; background: var(--bg-tertiary); border-radius: 8px; border-left: 3px solid var(--warning);">
+                <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 5px;">📋 Из задачи {{ parent_problem.number }}:</div>
+                <div style="font-size: 14px; color: var(--text-secondary);">{{ parent_problem.content | safe }}</div>
+            </div>
+            {% endif %}
+            
+            <!-- Problem from DB -->
+            <div class="problem-content" id="problem-content" data-raw-content="{{ problem.content | escape }}">
+                {{ problem.content | safe }}
+            </div>
+            
+            <!-- Cross-page Navigation -->
+            {% if problem.is_cross_page %}
+            <div class="cross-page-nav" style="margin-top: 20px; padding: 15px; background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%); border: 1px solid #667eea; border-radius: 8px;">
+                <h5 style="margin: 0 0 10px 0; color: #667eea;">📑 Эта задача на нескольких страницах:</h5>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    {% if problem.continues_from_page %}
+                    <a href="/textbook/page/{{ book_id }}/{{ problem.continues_from_page }}" class="cross-page-link" style="display: flex; align-items: center; gap: 5px; padding: 8px 12px; background: var(--bg-secondary); border-radius: 6px; text-decoration: none; color: var(--text-primary); font-size: 13px;">
+                        <span>⬅️</span>
+                        <span>Продолжение с {{ problem.continues_from_page }} стр.</span>
+                    </a>
+                    {% endif %}
+                    {% if problem.continues_to_page %}
+                    <a href="/textbook/page/{{ book_id }}/{{ problem.continues_to_page }}" class="cross-page-link" style="display: flex; align-items: center; gap: 5px; padding: 8px 12px; background: var(--bg-secondary); border-radius: 6px; text-decoration: none; color: var(--text-primary); font-size: 13px;">
+                        <span>Продолжается на {{ problem.continues_to_page }} стр.</span>
+                        <span>➡️</span>
+                    </a>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+            
+            <!-- Sub-problems (а, б, в, г, д...) -->
+            {% if problem.sub_problems %}
+            <div class="sub-problems">
+                <h5 style="margin: 0 0 15px 0; color: var(--accent-primary);">Подзадачи (кликни или жми ⬇️):</h5>
+                {% for sub in problem.sub_problems %}
+                <a href="/textbook/problem/{{ sub.id }}" class="sub-problem-link" id="sub-problem-{{ sub.id }}" style="text-decoration: none; color: inherit; display: block;">
+                    <div class="sub-problem">
+                        <div class="sub-problem-letter">{{ sub.number }})</div>
+                        <div class="sub-problem-content">{{ sub.content | replace(from=sub.number ~ ')', to='') | safe }}</div>
+                    </div>
+                </a>
+                {% endfor %}
+            </div>
+            {% endif %}
+            
+            <!-- Keyboard Navigation Info -->
+            <div id="keyboard-nav" class="keyboard-nav" style="display: flex; justify-content: space-between; align-items: center; margin-top: 20px; padding: 12px 20px; background: var(--bg-tertiary); border-radius: 8px; font-size: 13px; color: var(--text-muted);">
+                <div style="display: flex; gap: 20px;">
+                    <span>⬆️⬇️ Level</span>
+                    <span>⬅️➡️ Sub-problem</span>
+                </div>
+                <div id="nav-status" style="color: var(--accent-primary);"></div>
+            </div>
+            
+            <!-- Sibling Problems on Same Page -->
+            <div id="sibling-problems" class="sibling-problems" style="display: none; margin-top: 15px; padding: 15px; background: var(--bg-tertiary); border-radius: 8px; border-left: 3px solid var(--success);">
+                <h5 style="margin: 0 0 10px 0; color: var(--success);">📄 Other Problems on This Page:</h5>
+                <div id="sibling-list" style="display: flex; gap: 8px; flex-wrap: wrap;"></div>
+            </div>
+            
+            <!-- OCR Result -->
+            <div id="ocr-result" class="ocr-result">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h4>🔍 OCR Result (from PDF page)</h4>
+                    <span id="page-badge" style="background: var(--accent-primary); color: white; padding: 4px 12px; border-radius: 12px; font-size: 12px; display: none;">
+                        Page ID: <span id="page-id-display"></span>
+                    </span>
+                </div>
+                
+                <!-- Existing Page Problems (if any) -->
+                <div id="existing-page-problems" style="display: none; margin-bottom: 15px; padding: 10px; background: var(--bg-tertiary); border-radius: 6px;">
+                    <h5 style="color: var(--success); margin: 0 0 10px 0;">📄 Existing Problems on This Page:</h5>
+                    <div id="existing-problems-list" style="display: flex; gap: 8px; flex-wrap: wrap;"></div>
+                </div>
+                
+                <!-- Raw OCR Text -->
+                <div class="ocr-text" id="ocr-text" style="white-space: pre-wrap; font-family: monospace; background: var(--bg-tertiary); padding: 15px; border-radius: 6px; margin-bottom: 15px; max-height: 300px; overflow-y: auto;"></div>
+                
+                <!-- Parsed Problems List -->
+                <div id="parsed-problems" style="display: none; margin-bottom: 15px;">
+                    <h5 style="color: var(--accent-primary); margin-bottom: 10px;">📋 New Detected Problems:</h5>
+                    <div id="problems-list" style="max-height: 300px; overflow-y: auto;"></div>
+                </div>
+                
+                <div style="margin-top: 15px; display: flex; gap: 10px; flex-wrap: wrap;">
+                    <button class="btn btn-success" id="import-btn" onclick="importSelectedProblems()">
+                        ✓ Create as Page Children
+                    </button>
+                    <button class="btn btn-warning" onclick="reparsePage()" style="display: none;" id="reparse-btn">
+                        🔄 Re-parse Page
+                    </button>
+                    <button class="btn btn-secondary" onclick="importOcrToProblem()">
+                        📄 Import Full Text
+                    </button>
+                    <button class="btn btn-secondary" onclick="copyOcrToClipboard()">
+                        📋 Copy
+                    </button>
+                </div>
+            </div>
+            
+            <div class="actions">
+                <button class="btn btn-primary" id="solve-btn" onclick="generateSolution()">
+                    🤖 Solve with AI
+                </button>
+                {% if problem.page_number %}
+                <button class="btn btn-warning" id="ocr-btn" onclick="runOcrOnPage()">
+                    🔍 OCR This Page
+                </button>
+                <button class="btn btn-success" id="ai-parse-btn" onclick="runAiParse()" style="display: none;">
+                    🧠 AI Parse
+                </button>
+                <select id="parser-mode" style="padding: 8px 12px; border-radius: 6px; background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border-color);">
+                    <option value="regex">⚡ Regex Parser</option>
+                    <option value="ai">🧠 AI Parser (Mistral)</option>
+                </select>
+                <a href="/preview_image/{{ book_id }}.pdf/{{ problem.page_number }}" 
+                   class="btn btn-secondary" target="_blank">
+                    🔍 Open Image
+                </a>
+                {% endif %}
+            </div>
+        </div>
+        
+        <!-- PDF Source Image -->
+        <div class="pdf-source">
+            <h3>📄 Source from PDF</h3>
+            {% if problem.page_number %}
+            <div class="pdf-image">
+                <img src="/preview_image/{{ book_id }}.pdf/{{ problem.page_number }}" 
+                     alt="Page {{ problem.page_number }}"
+                     onerror="this.parentElement.innerHTML='<div class=\'no-image\'>🖼️ Preview not found</div>'">
+            </div>
+            {% else %}
+            <div class="pdf-image">
+                <div class="no-image">📄 No page number specified</div>
+            </div>
+            {% endif %}
+        </div>
+        
+        <!-- Solution Section -->
+        <div id="solution-section" class="solution-section">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 15px; border-bottom: 2px solid var(--accent-primary);">
+                <span style="font-size: 20px; font-weight: bold;">📝 Solution</span>
+                <span id="solution-badge" style="background: var(--bg-tertiary); padding: 4px 12px; border-radius: 4px; font-size: 12px;">AI Generated</span>
+            </div>
+            <div id="solution-content"></div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <script>
+        // Theme
+        function initTheme() {
+            const saved = localStorage.getItem('theme');
+            const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            const theme = saved || (prefersDark ? 'dark' : 'light');
+            document.documentElement.setAttribute('data-theme', theme);
+            document.getElementById('theme-icon').textContent = theme === 'dark' ? '☀️' : '🌙';
+        }
+
+        function toggleTheme() {
+            const current = document.documentElement.getAttribute('data-theme');
+            const next = current === 'dark' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', next);
+            localStorage.setItem('theme', next);
+            document.getElementById('theme-icon').textContent = next === 'dark' ? '☀️' : '🌙';
+        }
+
+        initTheme();
+
+        // Simple Markdown parser
+        function parseMarkdown(text) {
+            if (!text) return '';
+            return text
+                // Headers
+                .replace(/^###### (.*$)/gim, '<h6>$1</h6>')
+                .replace(/^##### (.*$)/gim, '<h5>$1</h5>')
+                .replace(/^#### (.*$)/gim, '<h4>$1</h4>')
+                .replace(/^### (.*$)/gim, '<h3>$1</h3>')
+                .replace(/^## (.*$)/gim, '<h2>$1</h2>')
+                .replace(/^# (.*$)/gim, '<h1>$1</h1>')
+                // Bold
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/__(.*?)__/g, '<strong>$1</strong>')
+                // Italic
+                .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                .replace(/_(.*?)_/g, '<em>$1</em>')
+                // Code
+                .replace(/`([^`]+)`/g, '<code style="background: var(--bg-tertiary); padding: 2px 6px; border-radius: 3px; font-family: monospace;">$1</code>')
+                // Newlines (for pre-wrap areas we keep \n, for HTML areas we use <br>)
+                .replace(/\n/g, '<br>');
+        }
+
+        // KaTeX
+        document.addEventListener("DOMContentLoaded", function() {
+            // Apply markdown parsing to existing problem content
+            const problemContent = document.getElementById('problem-content');
+            if (problemContent) {
+                const rawContent = problemContent.getAttribute('data-raw-content') || problemContent.textContent;
+                if (rawContent) {
+                    problemContent.innerHTML = parseMarkdown(rawContent);
+                }
+            }
+            
+            renderMathInElement(document.body, {
+                delimiters: [
+                    {left: '$$', right: '$$', display: true},
+                    {left: '$', right: '$', display: false}
+                ],
+                throwOnError: false
+            });
+            
+            // Load sibling problems on the same page
+            loadSiblingProblems();
+        });
+        
+        // Load sibling problems (other problems on the same page)
+        async function loadSiblingProblems() {
+            if (!pageNum) return;
+            
+            const pageId = `${bookId}:page:${pageNum}`;
+            
+            try {
+                const response = await fetch(`/api/pages/${pageId}/problems`);
+                if (!response.ok) return;
+                
+                const problems = await response.json();
+                if (problems.length > 0) {
+                    const list = document.getElementById('sibling-list');
+                    const container = document.getElementById('sibling-problems');
+                    
+                    list.innerHTML = problems.map(p => {
+                        const isCurrent = p.id === problemId;
+                        return `<a href="/textbook/problem/${p.id}" class="${isCurrent ? 'current' : ''}" title="${p.content.substring(0, 50)}...">
+                            ${isCurrent ? '● ' : ''}#${p.number}
+                        </a>`;
+                    }).join('');
+                    
+                    container.style.display = 'block';
+                }
+            } catch (e) {
+                console.log('No sibling problems found:', e);
+            }
+        }
+        
+        const problemId = '{{ problem.id }}';
+        const bookId = '{{ book_id }}';
+        const pageNum = {{ problem.page_number | default(value=0) }};
+        const parentId = {% if problem.parent_id %}'{{ problem.parent_id }}'{% else %}null{% endif %};
+        const isSubProblem = parentId !== null;
+        let currentOcrText = '';
+        
+        let parsedProblems = [];
+        
+        // Navigation data
+        let subProblemsList = [];
+        let siblingProblemsList = [];
+        let currentSubIndex = -1;
+        let currentSiblingIndex = -1;
+        
+        // Load navigation data
+        async function loadNavigationData() {
+            try {
+                if (isSubProblem) {
+                    // Load parent's sub-problems for left/right navigation
+                    const response = await fetch(`/api/problems/${parentId}`);
+                    if (response.ok) {
+                        const parent = await response.json();
+                        if (parent.sub_problems) {
+                            subProblemsList = parent.sub_problems;
+                            currentSubIndex = subProblemsList.findIndex(p => p.id === problemId);
+                        }
+                    }
+                    // Also load sibling problems from parent's level
+                    await loadSiblingProblemsForId(parentId);
+                } else {
+                    // Load own sub-problems
+                    const response = await fetch(`/api/problems/${problemId}`);
+                    if (response.ok) {
+                        const problem = await response.json();
+                        if (problem.sub_problems) {
+                            subProblemsList = problem.sub_problems;
+                        }
+                    }
+                    // Load sibling problems
+                    await loadSiblingProblemsForId(problemId);
+                }
+                updateNavStatus();
+            } catch (e) {
+                console.error('Failed to load navigation data:', e);
+            }
+        }
+        
+        async function loadSiblingProblemsForId(id) {
+            // Extract chapter_id from problem id (format: book:chapter:num or book:chapter:num:sub)
+            const parts = id.split(':');
+            if (parts.length >= 3) {
+                const chapterId = `${parts[0]}:${parts[1]}`;
+                try {
+                    const response = await fetch(`/api/chapters/${chapterId}/problems`);
+                    if (response.ok) {
+                        const problems = await response.json();
+                        // Filter only parent problems (no parent_id)
+                        siblingProblemsList = problems.filter(p => !p.parent_id);
+                        currentSiblingIndex = siblingProblemsList.findIndex(p => {
+                            // Match either exact id or parent of sub-problem
+                            return p.id === id || (isSubProblem && p.id === parentId);
+                        });
+                    }
+                } catch (e) {
+                    console.error('Failed to load sibling problems:', e);
+                }
+            }
+        }
+        
+        function updateNavStatus() {
+            const status = document.getElementById('nav-status');
+            if (!status) return;
+            
+            let text = '';
+            if (subProblemsList.length > 0) {
+                if (isSubProblem && currentSubIndex >= 0) {
+                    text += `Sub: ${currentSubIndex + 1}/${subProblemsList.length} `;
+                } else if (!isSubProblem) {
+                    text += `Subs: ${subProblemsList.length} `;
+                }
+            }
+            if (siblingProblemsList.length > 0 && currentSiblingIndex >= 0) {
+                text += `| Page: ${currentSiblingIndex + 1}/${siblingProblemsList.length}`;
+            }
+            status.textContent = text;
+        }
+        
+        // Keyboard navigation
+        document.addEventListener('keydown', function(e) {
+            // Ignore if in input or textarea
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+            
+            switch(e.key) {
+                case 'ArrowLeft':
+                    e.preventDefault();
+                    navigateSubProblem(-1);
+                    break;
+                case 'ArrowRight':
+                    e.preventDefault();
+                    navigateSubProblem(1);
+                    break;
+                case 'ArrowUp':
+                    e.preventDefault();
+                    navigateLevel(-1);
+                    break;
+                case 'ArrowDown':
+                    e.preventDefault();
+                    navigateLevel(1);
+                    break;
+            }
+        });
+        
+        function navigateSubProblem(direction) {
+            if (subProblemsList.length === 0) return;
+            
+            let targetIndex;
+            if (isSubProblem) {
+                // Navigate between sub-problems
+                targetIndex = currentSubIndex + direction;
+                if (targetIndex < 0 || targetIndex >= subProblemsList.length) return;
+                window.location.href = `/textbook/problem/${subProblemsList[targetIndex].id}`;
+            } else {
+                // Navigate to sub-problems
+                if (direction === 1 && subProblemsList.length > 0) {
+                    // Down - go to first sub-problem
+                    window.location.href = `/textbook/problem/${subProblemsList[0].id}`;
+                }
+            }
+        }
+        
+        function navigateLevel(direction) {
+            if (isSubProblem) {
+                if (direction === -1) {
+                    // Up - go to parent
+                    window.location.href = `/textbook/problem/${parentId}`;
+                }
+            } else {
+                // Navigate between sibling problems on the page
+                if (siblingProblemsList.length === 0) return;
+                
+                const targetIndex = currentSiblingIndex + direction;
+                if (targetIndex < 0 || targetIndex >= siblingProblemsList.length) return;
+                
+                window.location.href = `/textbook/problem/${siblingProblemsList[targetIndex].id}`;
+            }
+        }
+        
+        // Load navigation data on page load
+        loadNavigationData();
+        
+        // Load existing OCR on page load (if available)
+        async function loadExistingOcr() {
+            if (!pageNum) return;
+            
+            try {
+                const response = await fetch(`/api/page_ocr/${bookId}/${pageNum}`);
+                if (!response.ok) return;
+                
+                const data = await response.json();
+                if (data.has_ocr && data.ocr_text) {
+                    // Show existing OCR
+                    currentOcrText = data.ocr_text;
+                    document.getElementById('ocr-result').style.display = 'block';
+                    document.getElementById('ocr-text').textContent = currentOcrText;
+                    
+                    // Parse and show problems from existing OCR
+                    await parseAndShowProblems(currentOcrText);
+                    
+                    // Change button to "Regenerate OCR"
+                    const btn = document.getElementById('ocr-btn');
+                    btn.innerHTML = '🔄 Regenerate OCR';
+                    btn.disabled = false;
+                }
+            } catch (e) {
+                console.log('No existing OCR found:', e);
+            }
+        }
+        
+        // Helper function to escape HTML
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // Helper function to parse and show problems
+        async function parseAndShowProblems(text) {
+            const ocrText = document.getElementById('ocr-text');
+            const parsedProblemsDiv = document.getElementById('parsed-problems');
+            const problemsList = document.getElementById('problems-list');
+            
+            ocrText.innerHTML += '\n\n🔍 Parsing problems...';
+            
+            const parseResponse = await fetch('/api/parse_problems', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    text: text,
+                    book_id: bookId,
+                    chapter_num: parseInt('{{ problem.chapter_id }}'.split(':').pop()) || 1
+                })
+            });
+            
+            if (parseResponse.ok) {
+                const parseData = await parseResponse.json();
+                parsedProblems = parseData.problems || [];
+                
+                if (parsedProblems.length > 0) {
+                    // Show parsed problems with sub-problems
+                    problemsList.innerHTML = parsedProblems.map((p, idx) => {
+                        let subProblemsHtml = '';
+                        if (p.sub_problems && p.sub_problems.length > 0) {
+                            subProblemsHtml = `<div style="margin-top: 8px; padding-left: 15px; border-left: 2px solid var(--border-color);">
+                                <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">Подзадачи:</div>
+                                ${p.sub_problems.map(sub => `
+                                    <div style="font-size: 12px; padding: 3px 0;">
+                                        <span style="color: var(--accent-primary); font-weight: bold;">${sub.number})</span>
+                                        <span style="color: var(--text-secondary);">${sub.content.substring(0, 80)}${sub.content.length > 80 ? '...' : ''}</span>
+                                    </div>
+                                `).join('')}
+                            </div>`;
+                        }
+                        
+                        return `
+                            <div style="background: var(--bg-tertiary); padding: 12px; margin-bottom: 10px; border-radius: 6px; border-left: 3px solid var(--accent-primary);">
+                                <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer;">
+                                    <input type="checkbox" class="problem-checkbox" data-idx="${idx}" checked style="margin-top: 4px;">
+                                    <div style="flex: 1;">
+                                        <strong style="color: var(--accent-primary);">Problem ${p.number}</strong>
+                                        <div style="margin-top: 5px; font-size: 14px; white-space: pre-wrap; max-height: 100px; overflow: hidden;">${escapeHtml(p.content.substring(0, 200))}${p.content.length > 200 ? '...' : ''}</div>
+                                        ${p.latex_formulas.length > 0 ? `<div style="margin-top: 5px; font-size: 12px; color: var(--text-muted);">📐 Formulas: ${p.latex_formulas.length}</div>` : ''}
+                                        ${subProblemsHtml}
+                                    </div>
+                                </label>
+                            </div>
+                        `;
+                    }).join('');
+                    parsedProblemsDiv.style.display = 'block';
+                }
+                
+                // Render math
+                renderMathInElement(ocrText, {
+                    delimiters: [
+                        {left: '$$', right: '$$', display: true},
+                        {left: '$', right: '$', display: false}
+                    ],
+                    throwOnError: false
+                });
+            }
+        }
+        
+        // Load existing OCR on startup
+        loadExistingOcr();
+        
+        // Run OCR on PDF page
+        async function runOcrOnPage() {
+            if (!pageNum) {
+                alert('No page number for this problem');
+                return;
+            }
+            
+            const btn = document.getElementById('ocr-btn');
+            const ocrResult = document.getElementById('ocr-result');
+            const ocrText = document.getElementById('ocr-text');
+            const parsedProblemsDiv = document.getElementById('parsed-problems');
+            const problemsList = document.getElementById('problems-list');
+            
+            btn.disabled = true;
+            btn.innerHTML = '⏳ Running OCR...';
+            ocrResult.style.display = 'block';
+            parsedProblemsDiv.style.display = 'none';
+            ocrText.innerHTML = '<div class="loading">Processing image with AI...</div>';
+            
+            try {
+                // Step 1: Run OCR
+                const response = await fetch(`/api/ocr_page/${bookId}.pdf/${pageNum}?provider=mistral`, {
+                    method: 'POST'
+                });
+                
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.error || 'OCR failed');
+                }
+                
+                const data = await response.json();
+                currentOcrText = data.text;
+                ocrText.textContent = currentOcrText;
+                
+                // Step 2: Parse and show problems (with sub-problems)
+                await parseAndShowProblems(currentOcrText);
+                
+                btn.innerHTML = `✅ Found ${parsedProblems.length} problem(s)`;
+                
+            } catch (error) {
+                ocrText.innerHTML = `<div class="error">❌ ${error.message}</div>`;
+                btn.disabled = false;
+                btn.innerHTML = '🔍 Retry OCR';
+            }
+        }
+        
+        // Load existing problems on this page
+        async function loadExistingPageProblems(pageId) {
+            try {
+                const response = await fetch(`/api/pages/${pageId}/problems`);
+                if (!response.ok) return;
+                
+                const problems = await response.json();
+                if (problems.length > 0) {
+                    const list = document.getElementById('existing-problems-list');
+                    list.innerHTML = problems.map(p => `
+                        <a href="/textbook/problem/${p.id}" 
+                           style="background: var(--success); color: white; padding: 4px 12px; border-radius: 12px; font-size: 12px; text-decoration: none;"
+                           target="_blank">
+                            ${p.number}
+                        </a>
+                    `).join('');
+                    document.getElementById('existing-page-problems').style.display = 'block';
+                }
+            } catch (e) {
+                console.log('No existing problems or error:', e);
+            }
+        }
+        
+        // AI Parse using Mistral
+        async function runAiParse() {
+            if (!currentOcrText) {
+                alert('Run OCR first to get text');
+                return;
+            }
+            
+            const btn = document.getElementById('ai-parse-btn');
+            btn.disabled = true;
+            btn.innerHTML = '⏳ AI Parsing...';
+            
+            const ocrText = document.getElementById('ocr-text');
+            const parsedProblemsDiv = document.getElementById('parsed-problems');
+            const problemsList = document.getElementById('problems-list');
+            
+            parsedProblemsDiv.style.display = 'none';
+            ocrText.innerHTML += '\n\n🧠 AI analyzing text with Mistral...';
+            
+            try {
+                const response = await fetch('/api/ai_parse_problems', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        text: currentOcrText,
+                        book_id: bookId,
+                        chapter_num: parseInt('{{ problem.chapter_id }}'.split(':').pop()) || 1
+                    })
+                });
+                
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.error || 'AI parsing failed');
+                }
+                
+                const data = await response.json();
+                parsedProblems = data.problems || [];
+                
+                // Show parsed problems with sub-problems
+                if (parsedProblems.length > 0) {
+                    problemsList.innerHTML = parsedProblems.map((p, idx) => {
+                        let subProblemsHtml = '';
+                        if (p.sub_problems && p.sub_problems.length > 0) {
+                            subProblemsHtml = `<div style="margin-top: 8px; padding-left: 15px; border-left: 2px solid var(--border-color);">
+                                <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">Подзадачи:</div>
+                                ${p.sub_problems.map(sub => `
+                                    <div style="font-size: 12px; padding: 3px 0;">
+                                        <span style="color: var(--accent-primary); font-weight: bold;">${sub.number})</span>
+                                        <span style="color: var(--text-secondary);">${sub.content.substring(0, 80)}${sub.content.length > 80 ? '...' : ''}</span>
+                                    </div>
+                                `).join('')}
+                            </div>`;
+                        }
+                        
+                        return `
+                            <div style="background: var(--bg-tertiary); padding: 12px; margin-bottom: 10px; border-radius: 6px; border-left: 3px solid var(--success);">
+                                <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer;">
+                                    <input type="checkbox" class="problem-checkbox" data-idx="${idx}" checked style="margin-top: 4px;">
+                                    <div style="flex: 1;">
+                                        <strong style="color: var(--success);">🧠 Problem ${p.number}</strong>
+                                        <div style="margin-top: 5px; font-size: 14px; white-space: pre-wrap; max-height: 100px; overflow: hidden;">${escapeHtml(p.content.substring(0, 200))}${p.content.length > 200 ? '...' : ''}</div>
+                                        ${p.latex_formulas.length > 0 ? `<div style="margin-top: 5px; font-size: 12px; color: var(--text-muted);">📐 Formulas: ${p.latex_formulas.length}</div>` : ''}
+                                        ${subProblemsHtml}
+                                    </div>
+                                </label>
+                            </div>
+                        `;
+                    }).join('');
+                    parsedProblemsDiv.style.display = 'block';
+                }
+                
+                btn.innerHTML = `✅ AI Found ${parsedProblems.length}`;
+                
+            } catch (error) {
+                ocrText.innerHTML += `\n\n❌ AI Error: ${error.message}`;
+                btn.disabled = false;
+                btn.innerHTML = '🧠 Retry AI Parse';
+            }
+        }
+        
+        // Toggle AI button based on parser mode
+        document.getElementById('parser-mode')?.addEventListener('change', function() {
+            const aiBtn = document.getElementById('ai-parse-btn');
+            if (this.value === 'ai') {
+                aiBtn.style.display = 'inline-flex';
+            } else {
+                aiBtn.style.display = 'none';
+            }
+        });
+        
+        // Re-parse page (for multiple parsing)
+        async function reparsePage() {
+            if (!currentOcrText) return;
+            
+            if (!confirm('🔄 Re-parse will DELETE ALL old problems and create NEW ones.\n\nContinue?')) {
+                return;
+            }
+            
+            const btn = document.getElementById('reparse-btn');
+            btn.disabled = true;
+            btn.innerHTML = '⏳ Re-parsing...';
+            
+            try {
+                const chapterId = '{{ problem.chapter_id }}';
+                const chapterNum = parseInt(chapterId.split(':').pop()) || 1;
+                
+                const response = await fetch('/api/problems/bulk_create', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        text: currentOcrText,
+                        book_id: bookId,
+                        chapter_id: chapterId,
+                        chapter_num: chapterNum,
+                        page_number: pageNum || null
+                    })
+                });
+                
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.error || 'Failed to re-parse');
+                }
+                
+                const data = await response.json();
+                
+                // Update existing problems list
+                await loadExistingPageProblems(data.page_id);
+                
+                const deletedMsg = data.deleted_count > 0 ? `🗑️ Deleted ${data.deleted_count} old, ` : '';
+                alert(`✅ Re-parsed! ${deletedMsg}Created ${data.created_count} problem(s) on ${data.page_id}`);
+                
+                btn.disabled = false;
+                btn.innerHTML = '🔄 Re-parse Page';
+                
+            } catch (error) {
+                alert('❌ Failed to re-parse: ' + error.message);
+                btn.disabled = false;
+                btn.innerHTML = '🔄 Re-parse Page';
+            }
+        }
+        
+        // Import selected problems - creates ALL selected as new problems in DB
+        async function importSelectedProblems() {
+            if (!currentOcrText) return;
+            
+            if (!confirm(`🔄 This will DELETE all existing problems on this page and create NEW ones from OCR.\n\nFound: ${parsedProblems.length} problem(s)\n\nContinue?`)) {
+                return;
+            }
+            
+            const btn = document.querySelector('#ocr-result .btn-success');
+            btn.disabled = true;
+            btn.innerHTML = '⏳ Creating problems...';
+            
+            try {
+                // Extract chapter number from problem ID (format: book:chapter:problem)
+                const chapterId = '{{ problem.chapter_id }}';
+                const chapterNum = parseInt(chapterId.split(':').pop()) || 1;
+                
+                const response = await fetch('/api/problems/bulk_create', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        text: currentOcrText,
+                        book_id: bookId,
+                        chapter_id: chapterId,
+                        chapter_num: chapterNum,
+                        page_number: pageNum || null
+                    })
+                });
+                
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.error || 'Failed to create problems');
+                }
+                
+                const data = await response.json();
+                
+                // Show page badge
+                document.getElementById('page-id-display').textContent = data.page_id;
+                document.getElementById('page-badge').style.display = 'inline';
+                
+                // Create links to new problems
+                const problemLinks = data.problems.map(id => {
+                    const num = id.split(':').pop();
+                    return `<a href="/textbook/problem/${id}" style="color: var(--accent-primary); text-decoration: none;" target="_blank">Problem ${num}</a>`;
+                }).join(', ');
+                
+                const deletedInfo = data.deleted_count > 0 ? `<div style="font-size: 12px; margin-bottom: 8px; opacity: 0.9;">🗑️ Deleted ${data.deleted_count} old problems</div>` : '';
+                
+                document.getElementById('problems-list').innerHTML = `
+                    <div style="background: var(--success); color: white; padding: 15px; border-radius: 8px; text-align: center;">
+                        ${deletedInfo}
+                        <strong>✅ Created ${data.created_count} problem(s) as children of ${data.page_id}!</strong>
+                        <div style="margin-top: 10px; font-size: 14px;">
+                            ${problemLinks}
+                        </div>
+                    </div>
+                `;
+                document.getElementById('parsed-problems').style.display = 'block';
+                
+                // Show re-parse button
+                document.getElementById('reparse-btn').style.display = 'inline-flex';
+                
+                // Reload existing problems on this page
+                await loadExistingPageProblems(data.page_id);
+                
+                btn.innerHTML = '✅ Created!';
+                
+            } catch (error) {
+                alert('❌ Failed to create problems: ' + error.message);
+                btn.disabled = false;
+                btn.innerHTML = '✓ Import Selected';
+            }
+        }
+        
+        // Display content with markdown support
+        function displayProblemContent(elementId, text) {
+            const element = document.getElementById(elementId);
+            // Use parseMarkdown to convert headers, bold, etc.
+            element.innerHTML = parseMarkdown(text);
+            // Render math
+            renderMathInElement(element, {
+                delimiters: [
+                    {left: '$$', right: '$$', display: true},
+                    {left: '$', right: '$', display: false}
+                ],
+                throwOnError: false
+            });
+        }
+
+        // Import OCR text as problem
+        async function importOcrToProblem() {
+            if (!currentOcrText) return;
+            
+            // Show confirmation
+            if (!confirm('Replace problem text with OCR result?')) {
+                return;
+            }
+            
+            // Update UI immediately with markdown support
+            displayProblemContent('problem-content', currentOcrText);
+            
+            // Save to database via API
+            try {
+                const response = await fetch(`/api/problems/${problemId}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ content: currentOcrText })
+                });
+                
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.error || 'Failed to save');
+                }
+                
+                alert('✅ Problem text saved to database!');
+            } catch (error) {
+                alert('❌ Failed to save: ' + error.message + '\n\nText updated locally only.');
+            }
+        }
+        
+        // Copy OCR to clipboard
+        function copyOcrToClipboard() {
+            if (!currentOcrText) return;
+            navigator.clipboard.writeText(currentOcrText).then(() => {
+                alert('OCR text copied to clipboard!');
+            });
+        }
+        
+        // AI Solution
+        async function generateSolution() {
+            const btn = document.getElementById('solve-btn');
+            const solutionSection = document.getElementById('solution-section');
+            const solutionContent = document.getElementById('solution-content');
+            
+            btn.disabled = true;
+            btn.innerHTML = '⏳ Generating...';
+            solutionSection.style.display = 'block';
+            solutionContent.innerHTML = '<div class="loading">Generating AI solution...</div>';
+            solutionSection.scrollIntoView({ behavior: 'smooth' });
+            
+            try {
+                const response = await fetch('/api/problems/' + problemId + '/solve', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ provider: 'claude' })
+                });
+                
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.error || 'Failed');
+                }
+                
+                const data = await response.json();
+                solutionContent.innerHTML = '<div style="font-size: 16px; line-height: 1.8;">' + 
+                    data.solution.content.replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br>') + 
+                    '</div>';
+                
+                renderMathInElement(solutionContent, {
+                    delimiters: [{left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}],
+                    throwOnError: false
+                });
+                
+                btn.innerHTML = '✅ Solved!';
+                btn.classList.remove('btn-primary');
+                btn.classList.add('btn-success');
+                
+            } catch (error) {
+                solutionContent.innerHTML = '<div class="error">❌ ' + error.message + '</div>';
+                btn.disabled = false;
+                btn.innerHTML = '🔄 Retry';
+            }
+        }
+    </script>
+</body>
+</html>

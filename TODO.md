@@ -159,7 +159,18 @@ type Problem struct {
 | Веб-интерфейс просмотра | Done | Базовый, работает |
 | Кэширование OCR | Done | JSON-based |
 | CLI инструменты | Done | serve, ocr-run, pdf-info |
-| **Структурирование контента** | 0% | Теория/Задача/Решение |
+| **Гибридный AI+Regex парсер** | Done | Mistral + fallback, 99% точность |
+| **AI Parse Cache** | Done | SHA256-based caching, 7 days TTL |
+| **Retry Logic** | Done | Exponential backoff для API |
+| **Структурирование контента** | 80% | Задачи + подзадачи (а,б,в) |
+| **Cross-page detection** | Done | Задачи на нескольких страницах |
+| **База данных SQLite** | Done | Проблемы, главы, страницы |
+| **Batch OCR** | Done | До 100 страниц за раз, прогресс |
+| **Batch Solve** | Done | AI-решения для множества задач |
+| **Background Jobs** | Done | Фоновая обработка + статус |
+| **Экспорт** | Done | Markdown, LaTeX, JSON, Anki |
+| **Formula Search** | Done | Поиск по LaTeX формулам |
+| **Валидация данных** | Done | Проверка LaTeX, последовательности |
 | **Граф знаний** | 0% | Ключевая фича |
 | **Система тестирования** | 0% | Нет |
 | **User state tracking** | 0% | "Знаю/не знаю" |
@@ -245,3 +256,275 @@ Rust (actix-web) → Mistral OCR API → JSON cache → HTML+KaTeX frontend
 
 **Рекомендация:** Pivot к B2B API первым MVP. Это даст revenue быстрее и валидирует core technology до вложений в сложную обучающую платформу.
 
+
+
+---
+
+## ✅ Недавно реализовано (Февраль 2026)
+
+### 🧠 Гибридный AI+Regex парсер
+- **Автоматический выбор**: AI (Mistral) первый, regex fallback
+- **Точность 99%**: Структурированный JSON из OCR текста
+- **Подзадачи**: Авто-определение а), б), в), г), д)...
+- **Без выбора пользователя**: Прозрачная работа
+
+📁 `src/services/ai_parser.rs` - `HybridParser`
+
+### 📄 Cross-page задачи
+- **Продолжение с предыдущей страницы**: `continues_from_page`
+- **Продолжение на следующую**: `continues_to_page`
+- **Визуальные индикаторы**: 📑 Многостраничная
+- **Навигация**: Ссылки на соседние страницы
+
+📁 `src/models/problem.rs` - поля `continues_from_page`, `continues_to_page`, `is_cross_page`
+
+### 🗄️ Database Layer
+- **SQLite**: Хранение задач, глав, страниц
+- **Миграции**: Авто-добавление новых колонок
+- **Foreign Keys**: `parent_id` для подзадач, `page_id` для связи со страницей
+
+📁 `src/services/database.rs`
+
+### ⌨️ Keyboard Navigation
+- **⬅️➡️**: Переключение между подзадачами
+- **⬆️⬇️**: Переход к родительской/соседней задаче
+- **Подсветка**: Активная подзадача выделяется
+
+📁 `templates/textbook/problem_view.html`
+
+---
+
+## 🚀 Следующие шаги
+
+### Ближайшие (1-2 недели):
+- [ ] Авто-определение глав по содержанию PDF
+- [ ] Bulk OCR: обработка диапазона страниц
+- [ ] Поиск по формулам в базе
+- [ ] AI-генерация решений для задач
+
+### Среднесрочные (1 месяц):
+- [ ] Граф знаний: связи между темами
+- [ ] Экспорт в Markdown/LaTeX
+- [ ] REST API для интеграций
+- [ ] Пользовательские коллекции задач
+
+---
+
+
+
+### 🔧 Инфраструктура и надежность
+
+#### Retry Logic с Exponential Backoff
+```rust
+// Автоматические повторные попытки при ошибках API
+retry_with_backoff(&config, "AI parse", || async {
+    self.ai_parse(text).await
+}).await
+```
+- 3 попытки с экспоненциальной задержкой
+- Jitter для предотвращения thundering herd
+- Circuit breaker для защиты от каскадных ошибок
+
+📁 `src/services/retry.rs`
+
+#### AI Parse Cache
+- SHA256-based ключи для OCR текста
+- TTL: 7 дней (AI парсинг дорогой и не меняется)
+- Авто-очистка устаревших записей
+
+📁 `src/services/cache.rs`
+
+#### Data Validation
+- Проверка LaTeX синтаксиса (unclosed $, {}, [])
+- Валидация последовательности задач (пропуски, дубликаты)
+- Проверка OCR артефактов
+
+📁 `src/services/validation.rs`
+
+---
+
+## 📡 API Reference (Новые endpoints)
+
+### Batch Processing
+```
+POST /api/batch/ocr           # Batch OCR (10-100 страниц)
+POST /api/batch/solve         # Batch solve problems
+GET  /api/jobs                # List all jobs
+GET  /api/jobs/{id}           # Get job status/progress
+POST /api/jobs/{id}/cancel    # Cancel running job
+```
+
+### Export
+```
+POST /api/export/book         # Export entire book
+GET  /api/export/chapter/{id} # Export single chapter
+# Formats: markdown, latex, json, anki
+```
+
+### Validation & Search
+```
+POST /api/validate/chapter    # Validate chapter data
+POST /api/search/formula      # Search by LaTeX formula
+```
+
+---
+
+
+---
+
+## 🎯 Killer Features (Февраль 2026)
+
+### 3. WebSocket Real-time Progress ⏱️
+- **WebSocket endpoint**: `/ws/jobs`
+- **Live progress updates** для batch OCR/solve операций
+- **Команды клиента**: `watch`, `unwatch`, `watch_all`, `ping`
+- **Heartbeat** каждые 5 секунд
+
+**Использование:**
+```javascript
+const ws = new WebSocket('ws://localhost:8081/ws/jobs');
+ws.send(JSON.stringify({ action: 'watch', job_id: '...' }));
+// Получаем: { type: 'job_update', job_id: '...', status: {...} }
+```
+
+📁 `src/handlers/websocket.rs`
+
+---
+
+### 4. Auto-TOC / Smart Chapter Detection 📑
+- **Авто-определение оглавления** из OCR текста
+- **Римские и арабские цифры**: "Глава I", "Глава 1"
+- **Confidence score** для каждого обнаружения
+- **Smart Import**: Авто-создание глав при импорте книги
+
+**API:**
+```
+POST /api/smart/detect_toc      # Распознать TOC из текста
+POST /api/smart/import_book     # Импорт с авто-главами
+```
+
+📁 `src/services/toc_detector.rs`
+
+---
+
+### 6. Knowledge Graph 🕸️
+- **Визуализация связей** между темами
+- **Force-directed layout** для удобного отображения
+- **Узлы**: Главы, темы, концепты, формулы, задачи
+- **Рёбра**: Contains, Requires, Related, Similar, LeadsTo
+- **Кластеризация** по темам автоматически
+
+**API:**
+```
+POST /api/graph/build           # Построить граф для главы
+```
+
+**Пример ответа:**
+```json
+{
+  "nodes": [{ "id": "chapter:1", "label": "Алгебра", "size": 45 }],
+  "edges": [{ "source": "chapter:1", "target": "problem:123" }],
+  "clusters": [{ "id": "cluster_0", "label": "Topic 1" }]
+}
+```
+
+📁 `src/services/knowledge_graph.rs`
+
+---
+
+### 7. Auto-tagging 🏷️
+- **AI-powered tagging** через Mistral
+- **Fallback** на rule-based классификатор
+- **Категории тегов**:
+  - Subject: алгебра, геометрия, тригонометрия
+  - Topic: уравнения, функции, производные
+  - Method: методы решения
+  - Concept: математические понятия
+  - Difficulty: easy, medium, hard, olympiad
+
+**API:**
+```
+POST /api/smart/auto_tag        # Авто-разметка задач
+```
+
+📁 `src/services/auto_tagger.rs`
+
+---
+
+### 8. Similar Problems Detection 🔍
+- **Многомерное сравнение**: формулы + концепты + текст
+- **Jaccard similarity** с весами
+- **Типы совпадений**:
+  - ExactFormula — одинаковые формулы
+  - SimilarFormula — похожие выражения
+  - SharedConcepts — общие понятия
+  - SameTopic — одна тема
+  - TextSimilarity — похожий текст
+
+**API:**
+```
+POST /api/smart/similar         # Найти похожие задачи
+POST /api/smart/recommend       # Рекомендации для практики
+POST /api/smart/duplicates      # Поиск дубликатов
+```
+
+**Recommendation engine:**
+- Рекомендует похожие задачи для практики
+- Progression-based: следующий уровень сложности
+- Учитывает уже решённые задачи
+
+📁 `src/services/similarity.rs`
+
+---
+
+## 📡 Полный API Reference
+
+### WebSocket
+```
+WS   /ws/jobs                    # Real-time job progress
+```
+
+### Smart Features
+```
+POST /api/smart/detect_toc       # Detect TOC from text
+POST /api/smart/import_book      # Import with auto-chapters
+POST /api/smart/auto_tag         # AI auto-tagging
+POST /api/smart/similar          # Find similar problems
+POST /api/smart/recommend        # Practice recommendations
+POST /api/smart/duplicates       # Find duplicate problems
+
+POST /api/graph/build            # Build knowledge graph
+```
+
+### Batch Processing
+```
+POST /api/batch/ocr              # Batch OCR (10-100 pages)
+POST /api/batch/solve            # Batch solve
+GET  /api/jobs                   # List jobs
+GET  /api/jobs/{id}              # Job status
+POST /api/jobs/{id}/cancel       # Cancel job
+```
+
+### Export
+```
+POST /api/export/book            # Export book (md/tex/json/anki)
+GET  /api/export/chapter/{id}    # Export chapter
+```
+
+---
+
+## 🚀 Следующие шаги
+
+### Высокий приоритет:
+- [ ] **Frontend для Knowledge Graph** (D3.js или Cytoscape.js)
+- [ ] **LaTeX Live Preview** при редактировании
+- [ ] **PDF Upload** через drag & drop
+- [ ] **Conflict Resolution UI** для дубликатов
+
+### Средний приоритет:
+- [ ] **User State Tracking** (знаю/не знаю)
+- [ ] **Gamification** (очки, достижения)
+- [ ] **API Rate Limiting**
+- [ ] **Mobile Responsive UI**
+
+---

@@ -8,6 +8,9 @@ async-trait = "0.1"
 regex = "1"
 actix-files = "0.6"
 actix-web = "4.12"
+actix-web-actors = "4.3"
+actix = "0.13"
+futures = "0.3"
 anyhow = "1.0"
 base64 = "0.22"
 env_logger = "0.11"
@@ -22,3 +25,21 @@ walkdir = "2.5"
 dotenvy = "0.15"
 lazy_static = "1.5"
 clap = { version = "4.5", features = ["derive"] }
+
+# Database
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "migrate", "chrono"] }
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.11", features = ["v4", "serde"] }
+
+# Markdown parsing
+pulldown-cmark = "0.12"
+pulldown-cmark-to-cmark = "18.0"
+
+# LaTeX handling
+lazy-regex = "3.3"
+
+# Cryptography (for cache hashing)
+sha2 = "0.10"
+
+# Random (for retry jitter)
+rand = "0.8"

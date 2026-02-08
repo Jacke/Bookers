@@ -3,6 +3,62 @@ use crate::models::OcrError;
 use async_trait::async_trait;
 use base64::Engine;
 use serde_json::Value;
+use std::path::{Path, PathBuf};
+
+/// OCR Service for running OCR on images
+#[derive(Clone)]
+pub struct OcrService {
+    preview_dir: PathBuf,
+}
+
+impl OcrService {
+    pub fn new(preview_dir: PathBuf) -> Self {
+        Self { preview_dir }
+    }
+    
+    /// Run OCR on an image file
+    pub async fn run_ocr(&self, image_path: &Path, provider: &str) -> anyhow::Result<String> {
+        // Check if preview image exists
+        if !image_path.exists() {
+            return Err(anyhow::anyhow!("Image not found: {:?}", image_path));
+        }
+        
+        // Try to use venv python first
+        let python_path = if std::path::Path::new(".venv/bin/python").exists() {
+            ".venv/bin/python"
+        } else if std::path::Path::new(".venv/bin/python3").exists() {
+            ".venv/bin/python3"
+        } else {
+            "python3"
+        };
+        
+        let output = tokio::task::spawn_blocking({
+            let path = image_path.to_path_buf();
+            let py = python_path.to_string();
+            let prov = provider.to_string();
+            move || {
+                std::process::Command::new(&py)
+                    .arg("ocr.py")
+                    .arg(&path)
+                    .arg("-p")
+                    .arg(&prov)
+                    .output()
+            }
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("Task join error: {}", e))?;
+        
+        let output = output.map_err(|e| anyhow::anyhow!("Failed to run OCR: {}", e))?;
+        
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(anyhow::anyhow!("OCR script error: {}", stderr));
+        }
+        
+        let text = String::from_utf8_lossy(&output.stdout);
+        Ok(text.trim().to_string())
+    }
+}
 
 #[async_trait]
 pub trait OcrProvider: Send + Sync {

@@ -6,6 +6,12 @@
 
 # Environment
 .env
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
 
 # IDE
 .idea/
@@ -13,8 +19,15 @@
 *.swp
 *.swo
 
+# Logs
+*.log
+
 # Output
 /output/
+
+# Local data
+data/
+*.db
 
 # Resources (test data)
 resources/*.pdf

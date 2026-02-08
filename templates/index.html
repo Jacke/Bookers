@@ -45,10 +45,11 @@
         <div class="space-y-4">
             {% for file in files %}
             <div class="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-                <span class="text-gray-700">{{ file }}</span>
-                <div class="space-x-2">
-                    <button onclick="generatePreviews('{{ file }}')" class="px-4 py-2 bg-green-600 text-white rounded-lg shadow hover:bg-green-700 transition">Сгенерировать превью</button>
-                    <a href="/view?file={{ file }}" class="px-4 py-2 bg-blue-600 text-white rounded-lg shadow hover:bg-blue-700 transition">Просмотр</a>
+                <span class="text-gray-700 font-medium">{{ file }}</span>
+                <div class="space-x-2 flex flex-wrap gap-2">
+                    <button onclick="generatePreviews('{{ file }}')" class="px-3 py-2 bg-green-600 text-white rounded-lg shadow hover:bg-green-700 transition text-sm">📄 Генерировать превью</button>
+                    <a href="/view?file={{ file }}" class="px-3 py-2 bg-blue-600 text-white rounded-lg shadow hover:bg-blue-700 transition text-sm">👁 Просмотр PDF</a>
+                    <a href="/textbook/book/{{ file | replace(from='.pdf', to='') }}/pages" class="px-3 py-2 bg-purple-600 text-white rounded-lg shadow hover:bg-purple-700 transition text-sm">📚 Учебник (OCR)</a>
                 </div>
             </div>
             {% endfor %}

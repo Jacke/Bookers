@@ -68,13 +68,22 @@ impl Database {
                 is_cross_page BOOLEAN DEFAULT FALSE, -- True if spans multiple pages
                 FOREIGN KEY (chapter_id) REFERENCES chapters(id) ON DELETE CASCADE,
                 FOREIGN KEY (page_id) REFERENCES pages(id) ON DELETE SET NULL,
-                FOREIGN KEY (parent_id) REFERENCES problems(id) ON DELETE CASCADE,
-                UNIQUE(chapter_id, number)
+                FOREIGN KEY (parent_id) REFERENCES problems(id) ON DELETE CASCADE
             );
 
             CREATE INDEX IF NOT EXISTS idx_problems_chapter ON problems(chapter_id);
             CREATE INDEX IF NOT EXISTS idx_problems_page ON problems(page_number);
             CREATE INDEX IF NOT EXISTS idx_problems_parent ON problems(parent_id);
+
+            -- Uniqueness rules:
+            -- - Main problems: unique per chapter by number
+            -- - Sub-problems: unique per parent by letter/number
+            CREATE UNIQUE INDEX IF NOT EXISTS uniq_problems_main
+              ON problems(chapter_id, number)
+              WHERE parent_id IS NULL;
+            CREATE UNIQUE INDEX IF NOT EXISTS uniq_problems_sub
+              ON problems(parent_id, number)
+              WHERE parent_id IS NOT NULL;
 
             -- Pages table for OCR results
             CREATE TABLE IF NOT EXISTS pages (
@@ -129,6 +138,10 @@ impl Database {
         
         // Migration: Add cross-page columns if they don't exist
         self.add_cross_page_columns().await?;
+        // Migration: legacy schema used a table-level UNIQUE(chapter_id, number) which breaks sub-problems.
+        self.migrate_problems_table_uniqueness().await?;
+        // Ensure indexes exist after any migration/rebuild.
+        self.ensure_problem_indexes().await?;
 
         Ok(())
     }
@@ -158,6 +171,143 @@ impl Database {
             }
         }
         
+        Ok(())
+    }
+
+    /// Ensure indexes/constraints (implemented as indexes) exist on the `problems` table.
+    async fn ensure_problem_indexes(&self) -> Result<()> {
+        // Split out from the big init SQL so we can re-apply after table rebuilds.
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_problems_chapter ON problems(chapter_id);
+            CREATE INDEX IF NOT EXISTS idx_problems_page ON problems(page_number);
+            CREATE INDEX IF NOT EXISTS idx_problems_parent ON problems(parent_id);
+
+            CREATE UNIQUE INDEX IF NOT EXISTS uniq_problems_main
+              ON problems(chapter_id, number)
+              WHERE parent_id IS NULL;
+            CREATE UNIQUE INDEX IF NOT EXISTS uniq_problems_sub
+              ON problems(parent_id, number)
+              WHERE parent_id IS NOT NULL;
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Legacy DBs used `UNIQUE(chapter_id, number)` at the table level which prevents storing multiple
+    /// sub-problems like `а)`, `б)` across different parent problems in the same chapter.
+    ///
+    /// Fix: rebuild the `problems` table without that constraint and use partial unique indexes instead.
+    async fn migrate_problems_table_uniqueness(&self) -> Result<()> {
+        let table_sql: Option<String> = sqlx::query_scalar(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='problems'",
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let Some(sql) = table_sql else {
+            return Ok(());
+        };
+
+        if !sql.to_lowercase().contains("unique(chapter_id, number)") {
+            return Ok(());
+        }
+
+        log::info!("Migrating legacy problems table uniqueness constraints (enable sub-problems)...");
+
+        let mut tx = self.pool.begin().await?;
+
+        // Rebuild table with foreign keys disabled; we restore them after.
+        sqlx::query("PRAGMA foreign_keys = OFF")
+            .execute(&mut *tx)
+            .await?;
+
+        // Defensive cleanup if a previous migration attempt left artifacts behind.
+        sqlx::query("DROP TABLE IF EXISTS problems_new")
+            .execute(&mut *tx)
+            .await?;
+
+        sqlx::query(
+            r#"
+            CREATE TABLE problems_new (
+                id TEXT PRIMARY KEY,
+                chapter_id TEXT NOT NULL,
+                page_id TEXT,
+                parent_id TEXT,
+                number TEXT NOT NULL,
+                display_name TEXT NOT NULL,
+                content TEXT NOT NULL,
+                latex_formulas TEXT,
+                page_number INTEGER,
+                difficulty INTEGER,
+                has_solution BOOLEAN DEFAULT FALSE,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                continues_from_page INTEGER,
+                continues_to_page INTEGER,
+                is_cross_page BOOLEAN DEFAULT FALSE,
+                FOREIGN KEY (chapter_id) REFERENCES chapters(id) ON DELETE CASCADE,
+                FOREIGN KEY (page_id) REFERENCES pages(id) ON DELETE SET NULL,
+                FOREIGN KEY (parent_id) REFERENCES problems(id) ON DELETE CASCADE
+            );
+            "#,
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        // Copy data; coalesce nullable columns for newer code expectations.
+        sqlx::query(
+            r#"
+            INSERT INTO problems_new (
+                id, chapter_id, page_id, parent_id, number, display_name, content, latex_formulas,
+                page_number, difficulty, has_solution, created_at,
+                continues_from_page, continues_to_page, is_cross_page
+            )
+            SELECT
+                id, chapter_id, page_id, parent_id, number, display_name, content,
+                COALESCE(latex_formulas, '[]'),
+                page_number, difficulty, has_solution, created_at,
+                continues_from_page, continues_to_page, COALESCE(is_cross_page, 0)
+            FROM problems;
+            "#,
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query("DROP TABLE problems")
+            .execute(&mut *tx)
+            .await?;
+
+        sqlx::query("ALTER TABLE problems_new RENAME TO problems")
+            .execute(&mut *tx)
+            .await?;
+
+        // Recreate indexes on the rebuilt table inside the transaction.
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_problems_chapter ON problems(chapter_id);
+            CREATE INDEX IF NOT EXISTS idx_problems_page ON problems(page_number);
+            CREATE INDEX IF NOT EXISTS idx_problems_parent ON problems(parent_id);
+
+            CREATE UNIQUE INDEX IF NOT EXISTS uniq_problems_main
+              ON problems(chapter_id, number)
+              WHERE parent_id IS NULL;
+            CREATE UNIQUE INDEX IF NOT EXISTS uniq_problems_sub
+              ON problems(parent_id, number)
+              WHERE parent_id IS NOT NULL;
+            "#,
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query("PRAGMA foreign_keys = ON")
+            .execute(&mut *tx)
+            .await?;
+
+        tx.commit().await?;
+
         Ok(())
     }
 
@@ -263,71 +413,46 @@ impl Database {
         // Determine if cross-page
         let is_cross_page = problem.continues_from_page.is_some() || problem.continues_to_page.is_some();
         
-        // For sub-problems: use INSERT OR REPLACE since they have unique IDs with parent prefix
-        // For main problems: use ON CONFLICT DO UPDATE
-        if problem.parent_id.is_some() {
-            // Sub-problem - use REPLACE to update by ID
-            sqlx::query(
-                r#"
-                INSERT OR REPLACE INTO problems 
-                (id, chapter_id, page_id, parent_id, number, display_name, content, latex_formulas, 
-                 page_number, difficulty, has_solution, continues_from_page, continues_to_page, is_cross_page)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
-                "#
-            )
-            .bind(&problem.id)
-            .bind(&problem.chapter_id)
-            .bind(&problem.page_id)
-            .bind(&problem.parent_id)
-            .bind(&problem.number)
-            .bind(&problem.display_name)
-            .bind(&problem.content)
-            .bind(formulas_json)
-            .bind(problem.page_number.map(|p| p as i64))
-            .bind(problem.difficulty.map(|d| d as i64))
-            .bind(problem.has_solution)
-            .bind(problem.continues_from_page.map(|p| p as i64))
-            .bind(problem.continues_to_page.map(|p| p as i64))
-            .bind(is_cross_page)
-            .execute(&self.pool)
-            .await?;
-        } else {
-            // Main problem - use ON CONFLICT on (chapter_id, number)
-            sqlx::query(
-                r#"
-                INSERT INTO problems 
-                (id, chapter_id, page_id, parent_id, number, display_name, content, latex_formulas, 
-                 page_number, difficulty, has_solution, continues_from_page, continues_to_page, is_cross_page)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
-                ON CONFLICT(chapter_id, number) DO UPDATE SET
-                    id = excluded.id,
-                    content = excluded.content,
-                    latex_formulas = excluded.latex_formulas,
-                    page_id = excluded.page_id,
-                    parent_id = excluded.parent_id,
-                    difficulty = excluded.difficulty,
-                    continues_from_page = excluded.continues_from_page,
-                    continues_to_page = excluded.continues_to_page,
-                    is_cross_page = excluded.is_cross_page
-                "#
-            )
-            .bind(&problem.id)
-            .bind(&problem.chapter_id)
-            .bind(&problem.page_id)
-            .bind(&problem.parent_id)
-            .bind(&problem.number)
-            .bind(&problem.display_name)
-            .bind(&problem.content)
-            .bind(formulas_json)
-            .bind(problem.page_number.map(|p| p as i64))
-            .bind(problem.difficulty.map(|d| d as i64))
-            .bind(problem.has_solution)
-            .bind(problem.continues_from_page.map(|p| p as i64))
-            .bind(problem.continues_to_page.map(|p| p as i64))
-            .bind(is_cross_page)
-            .execute(&self.pool)
-            .await?;
-        }
+        // Upsert by primary key to avoid DELETE+INSERT semantics (which would cascade-delete solutions).
+        // Uniqueness for main problems and sub-problems is enforced via partial unique indexes.
+        sqlx::query(
+            r#"
+            INSERT INTO problems 
+            (id, chapter_id, page_id, parent_id, number, display_name, content, latex_formulas, 
+             page_number, difficulty, has_solution, continues_from_page, continues_to_page, is_cross_page)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+            ON CONFLICT(id) DO UPDATE SET
+                chapter_id = excluded.chapter_id,
+                page_id = excluded.page_id,
+                parent_id = excluded.parent_id,
+                number = excluded.number,
+                display_name = excluded.display_name,
+                content = excluded.content,
+                latex_formulas = excluded.latex_formulas,
+                page_number = excluded.page_number,
+                difficulty = excluded.difficulty,
+                -- Keep has_solution as-is (don't wipe user-generated data)
+                continues_from_page = excluded.continues_from_page,
+                continues_to_page = excluded.continues_to_page,
+                is_cross_page = excluded.is_cross_page
+            "#
+        )
+        .bind(&problem.id)
+        .bind(&problem.chapter_id)
+        .bind(&problem.page_id)
+        .bind(&problem.parent_id)
+        .bind(&problem.number)
+        .bind(&problem.display_name)
+        .bind(&problem.content)
+        .bind(formulas_json)
+        .bind(problem.page_number.map(|p| p as i64))
+        .bind(problem.difficulty.map(|d| d as i64))
+        .bind(problem.has_solution)
+        .bind(problem.continues_from_page.map(|p| p as i64))
+        .bind(problem.continues_to_page.map(|p| p as i64))
+        .bind(is_cross_page)
+        .execute(&self.pool)
+        .await?;
 
         Ok(())
     }
@@ -345,7 +470,7 @@ impl Database {
 
     pub async fn get_problems_by_chapter(&self, chapter_id: &str) -> Result<Vec<Problem>> {
         let rows = sqlx::query_as::<_, ProblemRow>(
-            "SELECT * FROM problems WHERE chapter_id = ?1 ORDER BY number"
+            "SELECT * FROM problems WHERE chapter_id = ?1 AND parent_id IS NULL ORDER BY number"
         )
         .bind(chapter_id)
         .fetch_all(&self.pool)
@@ -929,5 +1054,300 @@ impl From<SolutionRow> for Solution {
             created_at: chrono::DateTime::from_naive_utc_and_offset(row.created_at, chrono::Utc),
             updated_at: chrono::DateTime::from_naive_utc_and_offset(row.updated_at, chrono::Utc),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::Connection;
+
+    async fn new_temp_db() -> (Database, std::path::PathBuf) {
+        let path = std::env::temp_dir().join(format!("bookers_test_{}.db", uuid::Uuid::new_v4()));
+        // Ensure the file exists so the URL is always valid.
+        let _ = std::fs::File::create(&path);
+        let url = format!("sqlite:{}", path.to_str().unwrap());
+        let db = Database::new(&url).await.expect("db init");
+        (db, path)
+    }
+
+    async fn seed_book_and_chapter(db: &Database, book_id: &str, chapter_num: u32) -> String {
+        let book = Book {
+            id: book_id.to_string(),
+            title: book_id.to_string(),
+            author: None,
+            subject: None,
+            file_path: format!("resources/{}.pdf", book_id),
+            total_pages: 0,
+            created_at: chrono::Utc::now(),
+        };
+        db.create_book(&book).await.expect("create book");
+
+        let chapter_id = format!("{}:{}", book_id, chapter_num);
+        let chapter = Chapter {
+            id: chapter_id.clone(),
+            book_id: book_id.to_string(),
+            number: chapter_num,
+            title: format!("Глава {}", chapter_num),
+            description: None,
+            problem_count: 0,
+            theory_count: 0,
+            created_at: chrono::Utc::now(),
+        };
+        db.create_chapter(&chapter).await.expect("create chapter");
+        chapter_id
+    }
+
+    #[tokio::test]
+    async fn sub_problems_can_repeat_letters_across_different_parents() {
+        let (db, path) = new_temp_db().await;
+        let chapter_id = seed_book_and_chapter(&db, "algebra-7", 1).await;
+
+        let p1_id = Problem::generate_id("algebra-7", 1, "71");
+        let p2_id = Problem::generate_id("algebra-7", 1, "72");
+
+        let now = chrono::Utc::now();
+        let problems = vec![
+            Problem {
+                id: p1_id.clone(),
+                chapter_id: chapter_id.clone(),
+                page_id: None,
+                parent_id: None,
+                number: "71".to_string(),
+                display_name: "Задача 71".to_string(),
+                content: "71. Foo".to_string(),
+                latex_formulas: vec![],
+                page_number: Some(1),
+                difficulty: None,
+                has_solution: false,
+                created_at: now,
+                solution: None,
+                sub_problems: None,
+                continues_from_page: None,
+                continues_to_page: None,
+                is_cross_page: false,
+            },
+            Problem {
+                id: p2_id.clone(),
+                chapter_id: chapter_id.clone(),
+                page_id: None,
+                parent_id: None,
+                number: "72".to_string(),
+                display_name: "Задача 72".to_string(),
+                content: "72. Bar".to_string(),
+                latex_formulas: vec![],
+                page_number: Some(1),
+                difficulty: None,
+                has_solution: false,
+                created_at: now,
+                solution: None,
+                sub_problems: None,
+                continues_from_page: None,
+                continues_to_page: None,
+                is_cross_page: false,
+            },
+            Problem {
+                id: format!("{}:a", p1_id),
+                chapter_id: chapter_id.clone(),
+                page_id: None,
+                parent_id: Some(p1_id.clone()),
+                number: "a".to_string(),
+                display_name: "a)".to_string(),
+                content: "a) sub 1".to_string(),
+                latex_formulas: vec![],
+                page_number: Some(1),
+                difficulty: None,
+                has_solution: false,
+                created_at: now,
+                solution: None,
+                sub_problems: None,
+                continues_from_page: None,
+                continues_to_page: None,
+                is_cross_page: false,
+            },
+            Problem {
+                id: format!("{}:a", p2_id),
+                chapter_id: chapter_id.clone(),
+                page_id: None,
+                parent_id: Some(p2_id.clone()),
+                number: "a".to_string(),
+                display_name: "a)".to_string(),
+                content: "a) sub 2".to_string(),
+                latex_formulas: vec![],
+                page_number: Some(1),
+                difficulty: None,
+                has_solution: false,
+                created_at: now,
+                solution: None,
+                sub_problems: None,
+                continues_from_page: None,
+                continues_to_page: None,
+                is_cross_page: false,
+            },
+        ];
+
+        db.create_or_update_problems(&problems)
+            .await
+            .expect("insert problems");
+
+        // Chapter listing should return only parent problems.
+        let parents = db.get_problems_by_chapter(&chapter_id).await.expect("list");
+        assert_eq!(parents.len(), 2);
+
+        let subs1 = db.get_sub_problems(&p1_id).await.expect("subs1");
+        let subs2 = db.get_sub_problems(&p2_id).await.expect("subs2");
+        assert_eq!(subs1.len(), 1);
+        assert_eq!(subs2.len(), 1);
+        assert_eq!(subs1[0].number, "a");
+        assert_eq!(subs2[0].number, "a");
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn migrates_legacy_unique_constraint_and_allows_sub_problems() {
+        let path = std::env::temp_dir().join(format!("bookers_test_legacy_{}.db", uuid::Uuid::new_v4()));
+        let _ = std::fs::File::create(&path);
+        let url = format!("sqlite:{}", path.to_str().unwrap());
+
+        // Create a legacy `problems` table with table-level UNIQUE(chapter_id, number).
+        let mut conn = sqlx::SqliteConnection::connect(&url).await.expect("connect");
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS problems (
+                id TEXT PRIMARY KEY,
+                chapter_id TEXT NOT NULL,
+                page_id TEXT,
+                parent_id TEXT,
+                number TEXT NOT NULL,
+                display_name TEXT NOT NULL,
+                content TEXT NOT NULL,
+                latex_formulas TEXT,
+                page_number INTEGER,
+                difficulty INTEGER,
+                has_solution BOOLEAN DEFAULT FALSE,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (chapter_id) REFERENCES chapters(id) ON DELETE CASCADE,
+                FOREIGN KEY (page_id) REFERENCES pages(id) ON DELETE SET NULL,
+                FOREIGN KEY (parent_id) REFERENCES problems(id) ON DELETE CASCADE,
+                UNIQUE(chapter_id, number)
+            );
+            "#,
+        )
+        .execute(&mut conn)
+        .await
+        .expect("create legacy problems");
+        drop(conn);
+
+        // Init with current code: should rebuild the table and remove the legacy UNIQUE constraint.
+        let db = Database::new(&url).await.expect("init db");
+
+        let sql: String = sqlx::query_scalar(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='problems'",
+        )
+        .fetch_one(&db.pool)
+        .await
+        .expect("read schema");
+        assert!(
+            !sql.to_lowercase().contains("unique(chapter_id, number)"),
+            "legacy UNIQUE constraint should be removed"
+        );
+
+        let chapter_id = seed_book_and_chapter(&db, "algebra-7", 1).await;
+
+        // Now ensure repeated letters across parents are accepted.
+        let p1_id = Problem::generate_id("algebra-7", 1, "71");
+        let p2_id = Problem::generate_id("algebra-7", 1, "72");
+
+        let now = chrono::Utc::now();
+        let problems = vec![
+            Problem {
+                id: p1_id.clone(),
+                chapter_id: chapter_id.clone(),
+                page_id: None,
+                parent_id: None,
+                number: "71".to_string(),
+                display_name: "Задача 71".to_string(),
+                content: "71. Foo".to_string(),
+                latex_formulas: vec![],
+                page_number: Some(1),
+                difficulty: None,
+                has_solution: false,
+                created_at: now,
+                solution: None,
+                sub_problems: None,
+                continues_from_page: None,
+                continues_to_page: None,
+                is_cross_page: false,
+            },
+            Problem {
+                id: p2_id.clone(),
+                chapter_id: chapter_id.clone(),
+                page_id: None,
+                parent_id: None,
+                number: "72".to_string(),
+                display_name: "Задача 72".to_string(),
+                content: "72. Bar".to_string(),
+                latex_formulas: vec![],
+                page_number: Some(1),
+                difficulty: None,
+                has_solution: false,
+                created_at: now,
+                solution: None,
+                sub_problems: None,
+                continues_from_page: None,
+                continues_to_page: None,
+                is_cross_page: false,
+            },
+            Problem {
+                id: format!("{}:a", p1_id),
+                chapter_id: chapter_id.clone(),
+                page_id: None,
+                parent_id: Some(p1_id.clone()),
+                number: "a".to_string(),
+                display_name: "a)".to_string(),
+                content: "a) sub 1".to_string(),
+                latex_formulas: vec![],
+                page_number: Some(1),
+                difficulty: None,
+                has_solution: false,
+                created_at: now,
+                solution: None,
+                sub_problems: None,
+                continues_from_page: None,
+                continues_to_page: None,
+                is_cross_page: false,
+            },
+            Problem {
+                id: format!("{}:a", p2_id),
+                chapter_id: chapter_id.clone(),
+                page_id: None,
+                parent_id: Some(p2_id.clone()),
+                number: "a".to_string(),
+                display_name: "a)".to_string(),
+                content: "a) sub 2".to_string(),
+                latex_formulas: vec![],
+                page_number: Some(1),
+                difficulty: None,
+                has_solution: false,
+                created_at: now,
+                solution: None,
+                sub_problems: None,
+                continues_from_page: None,
+                continues_to_page: None,
+                is_cross_page: false,
+            },
+        ];
+
+        db.create_or_update_problems(&problems)
+            .await
+            .expect("insert problems after migration");
+
+        let subs1 = db.get_sub_problems(&p1_id).await.expect("subs1");
+        let subs2 = db.get_sub_problems(&p2_id).await.expect("subs2");
+        assert_eq!(subs1.len(), 1);
+        assert_eq!(subs2.len(), 1);
+
+        let _ = std::fs::remove_file(path);
     }
 }

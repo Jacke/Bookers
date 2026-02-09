@@ -179,7 +179,7 @@ pub async fn parse_problems_from_text(
     let page_number = body.page_number;
     
     // Parse with hybrid parser (AI first, regex fallback)
-    match parser.parse_text(&body.text, page_number).await {
+    match parser.parse_text(&body.book_id, &body.text, page_number).await {
         Ok(result) => {
             let parser_used = if std::env::var("MISTRAL_API_KEY").is_ok() { "ai" } else { "regex" };
             
@@ -220,7 +220,7 @@ pub async fn create_problems_from_ocr(
     let page_number = body.page_number.unwrap_or(1);
     
     // Parse with hybrid parser
-    let result = match parser.parse_text(&body.text, Some(page_number)).await {
+    let result = match parser.parse_text(&body.book_id, &body.text, Some(page_number)).await {
         Ok(r) => {
             log::info!("Parsed {} problems", r.problems.len());
             r

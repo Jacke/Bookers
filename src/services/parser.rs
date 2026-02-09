@@ -41,20 +41,13 @@ impl TextbookParser {
             Regex::new(r"(?m)^\s*[№#]\s*(\d+)[:.\s)]+").unwrap(),
         ];
 
-        let theory_patterns = vec![
-            // Теорема 1:
-            Regex::new(r"(?im)^\s*#*\s*Теорема\s*(\d+)[:.\s]*").unwrap(),
-            // Определение:
-            Regex::new(r"(?im)^\s*#*\s*Определение\s*(\d*)[:.\s]*").unwrap(),
-            // Свойство 1:
-            Regex::new(r"(?im)^\s*#*\s*Свойство\s*(\d+)[:.\s]*").unwrap(),
-            // Формула:
-            Regex::new(r"(?im)^\s*#*\s*Формула\s*(\d*)[:.\s]*").unwrap(),
-            // Доказательство:
-            Regex::new(r"(?im)^\s*#*\s*Доказательство[:.\s]*").unwrap(),
-            // Theorem, Definition, Property
-            Regex::new(r"(?im)^\s*#*\s*(Theorem|Definition|Property|Formula)\s*(\d*)[:.\s]*").unwrap(),
-        ];
+        // Theory blocks are much more consistent across OCR outputs than problems.
+        // Keep capture groups stable:
+        // 1) type keyword, 2) optional number, 3) optional inline title/rest of the header line.
+        let theory_patterns = vec![Regex::new(
+            r"(?im)^\s*#*\s*(теорема|определение|свойство|формула|доказательство|theorem|definition|property|formula|proof)\s*(\d*)\s*[:.\s]*(.*)$",
+        )
+        .unwrap()];
 
         Self {
             problem_patterns,
@@ -238,6 +231,10 @@ impl TextbookParser {
                         Some(s.to_string())
                     }
                 });
+                let inline_title = caps
+                    .get(3)
+                    .map(|m| m.as_str().trim())
+                    .filter(|s| !s.is_empty());
 
                 let theory_type = match type_str.as_deref() {
                     Some("теорема") | Some("theorem") => TheoryType::Theorem,
@@ -248,10 +245,11 @@ impl TextbookParser {
                     _ => TheoryType::Other,
                 };
 
-                let title = if num.is_some() {
-                    Some(format!("{:?} {}", theory_type, num.unwrap()))
-                } else {
-                    None
+                let title = match (num, inline_title) {
+                    (Some(n), Some(t)) => Some(format!("{} {}", n, t)),
+                    (Some(n), None) => Some(n),
+                    (None, Some(t)) => Some(t.to_string()),
+                    (None, None) => None,
                 };
 
                 return Some((theory_type, title));

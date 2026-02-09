@@ -54,11 +54,21 @@ impl HybridParser {
     }
 
     /// Main parse method - tries AI first, falls back to regex
-    pub async fn parse_text(&self, text: &str, page_num: Option<u32>) -> anyhow::Result<AIParseResult> {
+    pub async fn parse_text(&self, book_id: &str, text: &str, page_num: Option<u32>) -> anyhow::Result<AIParseResult> {
+        let cache_key = format!("{}\n{}", book_id, text);
+
         // Check cache first
-        if let Some(cached) = self.cache.get(text).await {
+        if let Some(cached) = self.cache.get(&cache_key).await {
             log::info!("✅ Cache hit for page {:?}", page_num);
             return Ok(cached);
+        }
+
+        // Book-specific parser (deterministic) for known textbooks.
+        if algebra7_parser::matches(book_id) {
+            log::info!("Using book-specific parser for {}", book_id);
+            let result = algebra7_parser::parse(text);
+            self.cache.set(&cache_key, result.clone()).await;
+            return Ok(result);
         }
         
         // Try AI parser first if API key available
@@ -67,7 +77,7 @@ impl HybridParser {
                 Ok(result) => {
                     log::info!("✅ AI parser successfully found {} problems", result.problems.len());
                     // Cache the result
-                    self.cache.set(text, result.clone()).await;
+                    self.cache.set(&cache_key, result.clone()).await;
                     return Ok(result);
                 }
                 Err(e) => {
@@ -101,7 +111,7 @@ impl HybridParser {
         let result = AIParseResult { problems };
         
         // Cache regex results too
-        self.cache.set(text, result.clone()).await;
+        self.cache.set(&cache_key, result.clone()).await;
         
         Ok(result)
     }
@@ -292,6 +302,299 @@ except Exception as e:
                     }
                 }
             }
+        }
+    }
+}
+
+/// Deterministic parser for `algebra-7` OCR output.
+///
+/// Goal: reliably extract "exercise"-style problems like `71. ...` and `566. ...` (and sub-problems
+/// like `а)` / `a)`) while avoiding false positives from step lists like `1) ...` inside examples.
+mod algebra7_parser {
+    use super::{AIParseResult, ParsedProblem, ParsedSubProblem};
+
+    pub fn matches(book_id: &str) -> bool {
+        let id = book_id.trim().trim_end_matches(".pdf");
+        id.eq_ignore_ascii_case("algebra-7")
+    }
+
+    pub fn parse(text: &str) -> AIParseResult {
+        let mut out = Vec::<ParsedProblem>::new();
+
+        let mut current: Option<ProblemBuilder> = None;
+
+        for raw in text.lines() {
+            let line = raw.trim();
+            if line.is_empty() {
+                continue;
+            }
+
+            // Skip markdown headings (section titles, etc.)
+            if line.starts_with('#') {
+                continue;
+            }
+
+            // Main problem start:
+            // - `71. ...`
+            // - `Задача 1. ...` / `Задача 1: ...`
+            if let Some((num, rest)) = parse_main_problem_start(line) {
+                if let Some(pb) = current.take() {
+                    out.push(pb.finish());
+                }
+                current = Some(ProblemBuilder::new(num, rest));
+                continue;
+            }
+
+            let Some(pb) = current.as_mut() else {
+                continue;
+            };
+
+            // Sub-problem start: `а) ...`, `a) ...`, `(а) ...`
+            if let Some((letter, rest)) = parse_sub_problem_start(line) {
+                pb.start_sub(letter, rest);
+                continue;
+            }
+
+            pb.push_line(line);
+        }
+
+        if let Some(pb) = current.take() {
+            out.push(pb.finish());
+        }
+
+        AIParseResult { problems: out }
+    }
+
+    fn parse_main_problem_start(line: &str) -> Option<(String, String)> {
+        if let Some((num, rest)) = parse_zadacha_start(line) {
+            return Some((num, rest));
+        }
+        if let Some((num, rest)) = parse_numeric_dot_start(line) {
+            return Some((num, rest));
+        }
+        None
+    }
+
+    fn parse_zadacha_start(line: &str) -> Option<(String, String)> {
+        let rest = line.strip_prefix("Задача")?.trim_start();
+        let bytes = rest.as_bytes();
+        let mut i = 0usize;
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+        if i == 0 {
+            return None;
+        }
+
+        let num = rest[..i].to_string();
+        let mut j = i;
+        while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+            j += 1;
+        }
+
+        if j < bytes.len() {
+            // Accept `.`, `:`, `)` as delimiter after the number.
+            match bytes[j] {
+                b'.' | b':' | b')' => {
+                    j += 1;
+                    while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                        j += 1;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let content = rest[j..].trim().to_string();
+        Some((num, content))
+    }
+
+    fn parse_numeric_dot_start(line: &str) -> Option<(String, String)> {
+        let bytes = line.as_bytes();
+        let mut i = 0usize;
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+        if i == 0 || i >= bytes.len() || bytes[i] != b'.' {
+            return None;
+        }
+
+        let num = line[..i].to_string();
+        i += 1; // skip '.'
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        let content = line[i..].trim().to_string();
+        Some((num, content))
+    }
+
+    fn parse_sub_problem_start(line: &str) -> Option<(String, String)> {
+        let mut it = line.chars();
+        let first = it.next()?;
+
+        if first == '(' {
+            let letter = it.next()?;
+            let close = it.next()?;
+            if close != ')' {
+                return None;
+            }
+            let rest: String = it.collect();
+            return Some((letter.to_lowercase().to_string(), rest.trim().to_string()));
+        }
+
+        if !first.is_alphabetic() {
+            return None;
+        }
+
+        let second = it.next()?;
+        if second != ')' && second != '.' && second != ']' {
+            return None;
+        }
+
+        let rest: String = it.collect();
+        Some((first.to_lowercase().to_string(), rest.trim().to_string()))
+    }
+
+    #[derive(Debug)]
+    struct ProblemBuilder {
+        number: String,
+        content: Vec<String>,
+        sub_problems: Vec<SubBuilder>,
+        current_sub: Option<SubBuilder>,
+    }
+
+    impl ProblemBuilder {
+        fn new(number: String, first_content_line: String) -> Self {
+            let mut content = Vec::new();
+            if !first_content_line.is_empty() {
+                content.push(first_content_line);
+            }
+            Self {
+                number,
+                content,
+                sub_problems: Vec::new(),
+                current_sub: None,
+            }
+        }
+
+        fn start_sub(&mut self, letter: String, first_line: String) {
+            if let Some(sub) = self.current_sub.take() {
+                self.sub_problems.push(sub);
+            }
+            self.current_sub = Some(SubBuilder::new(letter, first_line));
+        }
+
+        fn push_line(&mut self, line: &str) {
+            if let Some(ref mut sub) = self.current_sub {
+                sub.push_line(line);
+            } else {
+                self.content.push(line.to_string());
+            }
+        }
+
+        fn finish(mut self) -> ParsedProblem {
+            if let Some(sub) = self.current_sub.take() {
+                self.sub_problems.push(sub);
+            }
+
+            let content = self.content.join("\n").trim().to_string();
+            let sub_problems = self
+                .sub_problems
+                .into_iter()
+                .map(|s| s.finish())
+                .collect();
+
+            ParsedProblem {
+                number: self.number,
+                content,
+                sub_problems,
+                continues_from_prev: false,
+                continues_to_next: false,
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    struct SubBuilder {
+        letter: String,
+        content: Vec<String>,
+    }
+
+    impl SubBuilder {
+        fn new(letter: String, first_line: String) -> Self {
+            let mut content = Vec::new();
+            if !first_line.is_empty() {
+                content.push(first_line);
+            }
+            Self { letter, content }
+        }
+
+        fn push_line(&mut self, line: &str) {
+            self.content.push(line.to_string());
+        }
+
+        fn finish(self) -> ParsedSubProblem {
+            ParsedSubProblem {
+                letter: self.letter,
+                content: self.content.join("\n").trim().to_string(),
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn parses_numbered_exercises_and_subproblems() {
+            let text = r#"
+71. Результаты проверки скорости чтения...
+
+# Упражнения для повторения
+
+72. Найдите значение выражения:
+a) 2+2
+б) 3+3
+"#;
+
+            let res = parse(text);
+            assert_eq!(res.problems.len(), 2);
+            assert_eq!(res.problems[0].number, "71");
+            assert_eq!(res.problems[1].number, "72");
+            assert_eq!(res.problems[1].sub_problems.len(), 2);
+            assert_eq!(res.problems[1].sub_problems[0].letter, "a");
+            assert_eq!(res.problems[1].sub_problems[0].content, "2+2");
+        }
+
+        #[test]
+        fn does_not_treat_step_lists_as_problems() {
+            let text = r#"
+Пример 2. Найдём значение выражения
+1) $6^{2}=36$
+2) $(-2)^{5}=-32$
+
+73. Настоящая задача.
+"#;
+
+            let res = parse(text);
+            assert_eq!(res.problems.len(), 1);
+            assert_eq!(res.problems[0].number, "73");
+        }
+
+        #[test]
+        fn parses_zadacha_prefix() {
+            let text = r#"
+## 5. Выражения с переменными
+Задача 1. Завод ежедневно перерабатывает 5 т молока.
+Задача 2: Ширина прямоугольника равна 5 см.
+"#;
+
+            let res = parse(text);
+            assert_eq!(res.problems.len(), 2);
+            assert_eq!(res.problems[0].number, "1");
+            assert!(res.problems[0].content.starts_with("Завод"));
+            assert_eq!(res.problems[1].number, "2");
+            assert!(res.problems[1].content.starts_with("Ширина"));
         }
     }
 }

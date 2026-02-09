@@ -105,7 +105,7 @@ impl BatchProcessor {
             };
             
             // Parse problems
-            let parse_result = match parser.parse_text(&ocr_text, Some(page_num)).await {
+            let parse_result = match parser.parse_text(book_id, &ocr_text, Some(page_num)).await {
                 Ok(r) => r,
                 Err(e) => {
                     errors.push(format!("Page {}: Parse failed - {}", page_num, e));

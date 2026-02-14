@@ -92,14 +92,34 @@ impl BatchProcessor {
                 &format!("OCR: page {} of {}", page_num, end_page)
             ).await;
             
-            let filename = format!("{}.pdf", book_id);
-            let image_path = self.config.preview_dir.join(format!("{}_{}.png", filename, page_num));
+            // Check for cached OCR in database first
+            let cached_ocr = match self.db.get_page(book_id, page_num).await {
+                Ok(Some(page)) if page.ocr_text.is_some() && !page.ocr_text.as_ref().unwrap().is_empty() => {
+                    log::info!("Using cached OCR for page {}", page_num);
+                    page.ocr_text
+                }
+                _ => None,
+            };
             
-            match ocr_service.run_ocr(&image_path, "mistral").await {
-                Ok(text) => all_ocr_texts[idx] = Some(text),
-                Err(e) => {
-                    log::warn!("OCR failed for page {}: {}", page_num, e);
-                    all_ocr_texts[idx] = None;
+            if let Some(text) = cached_ocr {
+                all_ocr_texts[idx] = Some(text);
+            } else {
+                // Run OCR if not cached
+                let filename = format!("{}.pdf", book_id);
+                let image_path = self.config.preview_dir.join(format!("{}_{}.png", filename, page_num));
+                
+                match ocr_service.run_ocr(&image_path, "mistral").await {
+                    Ok(text) => {
+                        all_ocr_texts[idx] = Some(text.clone());
+                        // Save OCR to database for future use
+                        if let Ok(page) = self.db.get_or_create_page(book_id, page_num).await {
+                            let _ = self.db.update_page_ocr(&page.id, &text, 0).await;
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("OCR failed for page {}: {}", page_num, e);
+                        all_ocr_texts[idx] = None;
+                    }
                 }
             }
             
@@ -126,7 +146,31 @@ impl BatchProcessor {
             log::warn!("Unconsumed chapter carryover at end: {} chars", chapter_carryover.len());
         }
         
-        // === SECOND PASS: Parse with cross-page context ===
+        // === Second PASS: Parse ALL pages first (to avoid double parsing) ===
+        let mut all_parse_results: Vec<Option<crate::services::ai_parser::AIParseResult>> = Vec::new();
+        
+        for (idx, page_num) in (start_page..=end_page).enumerate() {
+            let progress = 50.0 + (idx as f32 / total_pages as f32) * 25.0;
+            self.job_manager.update_progress(
+                job_id,
+                progress,
+                &format!("Parsing: page {} of {}", page_num, end_page)
+            ).await;
+            
+            let page_text = processed_ocr_texts.get(idx)
+                .and_then(|(t, _)| Some(t.as_str()))
+                .unwrap_or("");
+            
+            match parser.parse_text(book_id, page_text, Some(page_num)).await {
+                Ok(r) => all_parse_results.push(Some(r)),
+                Err(e) => {
+                    log::warn!("Parse failed for page {}: {}", page_num, e);
+                    all_parse_results.push(None);
+                }
+            }
+        }
+        
+        // === THIRD PASS: Process cross-page context ===
         let mut processed = 0u32;
         let mut total_problems = 0u32;
         let mut errors = Vec::new();
@@ -140,39 +184,30 @@ impl BatchProcessor {
                 }
             }
             
-            let progress = 50.0 + (processed as f32 / total_pages as f32) * 50.0;
+            let progress = 75.0 + (processed as f32 / total_pages as f32) * 25.0;
             self.job_manager.update_progress(
                 job_id,
                 progress,
-                &format!("Parsing: page {} of {}", page_num, end_page)
+                &format!("Processing: page {} of {}", page_num, end_page)
             ).await;
+            
+            // Get current parse result (already parsed)
+            let mut parse_result = match all_parse_results.get(idx).and_then(|r| r.as_ref()) {
+                Some(r) => r.clone(),
+                None => {
+                    errors.push(format!("Page {}: No parse result", page_num));
+                    processed += 1;
+                    continue;
+                }
+            };
             
             let page_text = processed_ocr_texts.get(idx)
                 .and_then(|(t, _)| Some(t.as_str()))
                 .unwrap_or("");
             
-            // Get next page text for cross-page analysis
+            // Get next page problems for cross-page analysis
             let next_problems: Option<Vec<crate::services::ai_parser::ParsedProblem>> = 
-                if idx + 1 < processed_ocr_texts.len() {
-                    // Pre-parse next page to get problem numbers
-                    if let Ok(r) = parser.parse_text(book_id, processed_ocr_texts[idx + 1].0.as_str(), Some(page_num + 1)).await {
-                        Some(r.problems)
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-            
-            // Parse current page
-            let mut parse_result = match parser.parse_text(book_id, page_text, Some(page_num)).await {
-                Ok(r) => r,
-                Err(e) => {
-                    errors.push(format!("Page {}: Parse failed - {}", page_num, e));
-                    processed += 1;
-                    continue;
-                }
-            };
+                all_parse_results.get(idx + 1).and_then(|r| r.as_ref()).map(|r| r.problems.clone());
             
             // Process cross-page merging
             parser.process_cross_page(

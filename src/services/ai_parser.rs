@@ -318,16 +318,24 @@ except Exception as e:
         }
 
         let lines: Vec<&str> = content.lines().collect();
-        if lines.len() < 2 {
+        if lines.is_empty() {
             return None;
         }
 
+        // Check if last line ends with sentence terminator
         let last_line = lines.last().unwrap().trim();
         if last_line.ends_with('.') || last_line.ends_with(';') || last_line.ends_with('!') || last_line.ends_with('?') {
             return None;
         }
 
-        let tail = lines[1..].join("\n").trim().to_string();
+        // Take all lines except the first (which is typically the problem number)
+        // as the continuation tail
+        let tail = if lines.len() > 1 {
+            lines[1..].join("\n").trim().to_string()
+        } else {
+            lines.join("\n").trim().to_string()
+        };
+
         if tail.is_empty() {
             None
         } else {
@@ -361,23 +369,196 @@ except Exception as e:
                     if let Some(tail) = prev_continuation_tail {
                         first.content = self.merge_with_prev_content(&first.content, Some(tail));
                     }
-                }
-            }
-        }
-
-        // Mark and extract tail for next page
-        if let Some(next) = next_problems {
-            if let Some(current_last) = current_problems.last() {
-                if let Some(next_first) = next.first() {
-                    if current_last.number == next_first.number {
-                        // Mark current as continuing
-                        if let Some(last) = current_problems.last_mut() {
-                            last.continues_to_next = true;
+                    
+                    // Also handle sub-problems: if parent continues from prev,
+                    // sub-problems with same letter also continue
+                    if !prev.sub_problems.is_empty() && !first.sub_problems.is_empty() {
+                        for sub in first.sub_problems.iter_mut() {
+                            if let Some(prev_sub) = prev.sub_problems.iter().find(|s| s.letter == sub.letter) {
+                                sub.content = format!("{}\n\n{}", prev_sub.content.trim(), sub.content.trim());
+                            }
                         }
                     }
                 }
             }
         }
+
+        // Mark and extract tail for next page
+        let should_mark_continuation = if let Some(next) = next_problems {
+            if let Some(current_last) = current_problems.last() {
+                if let Some(next_first) = next.first() {
+                    current_last.number == next_first.number
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        if should_mark_continuation {
+            if let Some(last) = current_problems.last_mut() {
+                last.continues_to_next = true;
+            }
+
+            // Handle sub-problems continuation to next page
+            let current_last = current_problems.last();
+            let next_first = next_problems.and_then(|n| n.first());
+            
+            if let (Some(cl), Some(nf)) = (current_last, next_first) {
+                if !cl.sub_problems.is_empty() && !nf.sub_problems.is_empty() {
+                    if let Some(last_sub) = cl.sub_problems.last() {
+                        if let Some(next_first_sub) = nf.sub_problems.first() {
+                            if last_sub.letter == next_first_sub.letter || 
+                               !nf.sub_problems.iter().any(|s| s.letter == last_sub.letter) {
+                                if let Some(l) = current_problems.last_mut() {
+                                    if let Some(sub) = l.sub_problems.last_mut() {
+                                        sub.content = format!("{}\n\n{}", sub.content.trim(), next_first_sub.content.trim());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod cross_page_tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_continuation_tail_incomplete() {
+        let parser = HybridParser::new(None);
+        
+        let problem = ParsedProblem {
+            number: "702".to_string(),
+            content: "702. Условие задачи без точки в конце\nчастичный ответ".to_string(),
+            sub_problems: vec![],
+            continues_from_prev: false,
+            continues_to_next: true,
+        };
+        
+        let tail = parser.extract_continuation_tail(&problem);
+        assert!(tail.is_some());
+        let tail = tail.unwrap();
+        assert!(tail.contains("частичный ответ"));
+    }
+
+    #[test]
+    fn test_extract_continuation_tail_complete() {
+        let parser = HybridParser::new(None);
+        
+        let problem = ParsedProblem {
+            number: "702".to_string(),
+            content: "702. Полное условие задачи.".to_string(),
+            sub_problems: vec![],
+            continues_from_prev: false,
+            continues_to_next: false,
+        };
+        
+        let tail = parser.extract_continuation_tail(&problem);
+        assert!(tail.is_none());
+    }
+
+    #[test]
+    fn test_merge_with_prev_content() {
+        let parser = HybridParser::new(None);
+        
+        let current = "Полное решение задачи.";
+        let prev_tail = Some("Начало условия");
+        
+        let merged = parser.merge_with_prev_content(current, prev_tail);
+        assert!(merged.contains("Начало условия"));
+        assert!(merged.contains("Полное решение"));
+    }
+
+    #[test]
+    fn test_process_cross_page_continuation() {
+        let parser = HybridParser::new(None);
+        
+        let prev = ParsedProblem {
+            number: "702".to_string(),
+            content: "702. Часть задачи".to_string(),
+            sub_problems: vec![],
+            continues_from_prev: false,
+            continues_to_next: true,
+        };
+        
+        let mut current = vec![
+            ParsedProblem {
+                number: "702".to_string(),
+                content: "702. Часть задачи\nПродолжение на этой странице".to_string(),
+                sub_problems: vec![],
+                continues_from_prev: false,
+                continues_to_next: false,
+            },
+            ParsedProblem {
+                number: "703".to_string(),
+                content: "703. Другая задача.".to_string(),
+                sub_problems: vec![],
+                continues_from_prev: false,
+                continues_to_next: false,
+            },
+        ];
+        
+        let next = vec![
+            ParsedProblem {
+                number: "703".to_string(),
+                content: "703. Другая задача.\nПродолжение".to_string(),
+                sub_problems: vec![],
+                continues_from_prev: false,
+                continues_to_next: false,
+            },
+        ];
+        
+        parser.process_cross_page(Some(&prev), Some("Часть задачи"), &mut current, Some(&next));
+        
+        assert!(current[0].continues_from_prev);
+        assert!(current[1].continues_to_next);
+    }
+
+    #[test]
+    fn test_process_cross_page_with_subproblems() {
+        let parser = HybridParser::new(None);
+        
+        let prev = ParsedProblem {
+            number: "702".to_string(),
+            content: "702. Задача".to_string(),
+            sub_problems: vec![
+                ParsedSubProblem {
+                    letter: "a".to_string(),
+                    content: "подзадача а".to_string(),
+                },
+            ],
+            continues_from_prev: false,
+            continues_to_next: true,
+        };
+        
+        let mut current = vec![
+            ParsedProblem {
+                number: "702".to_string(),
+                content: "702. Задача".to_string(),
+                sub_problems: vec![
+                    ParsedSubProblem {
+                        letter: "a".to_string(),
+                        content: "подзадача а продолжение".to_string(),
+                    },
+                ],
+                continues_from_prev: false,
+                continues_to_next: false,
+            },
+        ];
+        
+        parser.process_cross_page(Some(&prev), None, &mut current, None);
+        
+        assert!(current[0].continues_from_prev);
+        assert!(current[0].sub_problems[0].content.contains("подзадача а"));
+        assert!(current[0].sub_problems[0].content.contains("продолжение"));
     }
 }
 

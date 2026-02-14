@@ -60,12 +60,6 @@ impl BatchProcessor {
     async fn run_batch_ocr(&self, job_id: &str, book_id: &str, start_page: u32, end_page: u32, chapter_id: &str) {
         let start_time = std::time::Instant::now();
         let total_pages = end_page - start_page + 1;
-        let mut processed = 0u32;
-        let mut total_problems = 0u32;
-        let mut errors = Vec::new();
-        // Tail text detected at page boundary (e.g. "Глава 5...") that should be
-        // parsed with the next page, not appended to the last problem of current page.
-        let mut carryover_text = String::new();
         
         // Get book info
         let _book = match self.db.get_book(book_id).await {
@@ -79,44 +73,99 @@ impl BatchProcessor {
         let parser = HybridParser::new(std::env::var("MISTRAL_API_KEY").ok());
         let ocr_service = OcrService::new(self.config.preview_dir.clone());
         
-        for page_num in start_page..=end_page {
-            // Check if job was cancelled
+        // === FIRST PASS: OCR all pages ===
+        self.job_manager.update_progress(job_id, 0.0, "Running OCR on all pages...").await;
+        
+        let mut all_ocr_texts: Vec<Option<String>> = vec![None; total_pages as usize];
+        
+        for (idx, page_num) in (start_page..=end_page).enumerate() {
             if let Some(job) = self.job_manager.get_job(job_id).await {
                 if matches!(job.status, JobStatus::Cancelled) {
                     return;
                 }
             }
             
-            let progress = processed as f32 / total_pages as f32 * 100.0;
+            let progress = (idx as f32 / total_pages as f32) * 50.0;
             self.job_manager.update_progress(
                 job_id,
                 progress,
-                &format!("Processing page {} of {}", page_num, end_page)
+                &format!("OCR: page {} of {}", page_num, end_page)
             ).await;
             
-            // Run OCR on page
             let filename = format!("{}.pdf", book_id);
             let image_path = self.config.preview_dir.join(format!("{}_{}.png", filename, page_num));
             
-            let ocr_text = match ocr_service.run_ocr(&image_path, "mistral").await {
-                Ok(text) => text,
+            match ocr_service.run_ocr(&image_path, "mistral").await {
+                Ok(text) => all_ocr_texts[idx] = Some(text),
                 Err(e) => {
-                    errors.push(format!("Page {}: OCR failed - {}", page_num, e));
-                    processed += 1;
-                    continue;
+                    log::warn!("OCR failed for page {}: {}", page_num, e);
+                    all_ocr_texts[idx] = None;
                 }
-            };
-
-            let merged_text = if carryover_text.is_empty() {
-                ocr_text
-            } else {
-                format!("{}\n\n{}", carryover_text, ocr_text)
-            };
-            let (page_text, next_carryover) = split_trailing_chapter_heading(&merged_text);
-            carryover_text = next_carryover.unwrap_or_default();
+            }
             
-            // Parse problems
-            let parse_result = match parser.parse_text(book_id, &page_text, Some(page_num)).await {
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        }
+        
+        // === Process chapter headings (carryover between pages) ===
+        let mut processed_ocr_texts: Vec<(String, Option<String>)> = Vec::new();
+        let mut chapter_carryover = String::new();
+        
+        for (idx, ocr_text_opt) in all_ocr_texts.iter().enumerate() {
+            let ocr_text = ocr_text_opt.as_deref().unwrap_or("");
+            let merged = if chapter_carryover.is_empty() {
+                ocr_text.to_string()
+            } else {
+                format!("{}\n\n{}", chapter_carryover, ocr_text)
+            };
+            let (page_text, next_carryover) = split_trailing_chapter_heading(&merged);
+            chapter_carryover = next_carryover.unwrap_or_default();
+            processed_ocr_texts.push((page_text.clone(), Some(page_text)));
+        }
+        
+        if !chapter_carryover.trim().is_empty() {
+            log::warn!("Unconsumed chapter carryover at end: {} chars", chapter_carryover.len());
+        }
+        
+        // === SECOND PASS: Parse with cross-page context ===
+        let mut processed = 0u32;
+        let mut total_problems = 0u32;
+        let mut errors = Vec::new();
+        let mut prev_last_problem: Option<crate::services::ai_parser::ParsedProblem> = None;
+        let mut prev_continuation_tail: Option<String> = None;
+        
+        for (idx, page_num) in (start_page..=end_page).enumerate() {
+            if let Some(job) = self.job_manager.get_job(job_id).await {
+                if matches!(job.status, JobStatus::Cancelled) {
+                    return;
+                }
+            }
+            
+            let progress = 50.0 + (processed as f32 / total_pages as f32) * 50.0;
+            self.job_manager.update_progress(
+                job_id,
+                progress,
+                &format!("Parsing: page {} of {}", page_num, end_page)
+            ).await;
+            
+            let page_text = processed_ocr_texts.get(idx)
+                .and_then(|(t, _)| Some(t.as_str()))
+                .unwrap_or("");
+            
+            // Get next page text for cross-page analysis
+            let next_problems: Option<Vec<crate::services::ai_parser::ParsedProblem>> = 
+                if idx + 1 < processed_ocr_texts.len() {
+                    // Pre-parse next page to get problem numbers
+                    if let Ok(r) = parser.parse_text(book_id, processed_ocr_texts[idx + 1].0.as_str(), Some(page_num + 1)).await {
+                        Some(r.problems)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+            
+            // Parse current page
+            let mut parse_result = match parser.parse_text(book_id, page_text, Some(page_num)).await {
                 Ok(r) => r,
                 Err(e) => {
                     errors.push(format!("Page {}: Parse failed - {}", page_num, e));
@@ -124,6 +173,23 @@ impl BatchProcessor {
                     continue;
                 }
             };
+            
+            // Process cross-page merging
+            parser.process_cross_page(
+                prev_last_problem.as_ref(),
+                prev_continuation_tail.as_deref(),
+                &mut parse_result.problems,
+                next_problems.as_deref(),
+            );
+            
+            // Extract continuation tail for next page
+            if let Some(last) = parse_result.problems.last() {
+                prev_continuation_tail = parser.extract_continuation_tail(last);
+                prev_last_problem = Some(last.clone());
+            } else {
+                prev_continuation_tail = None;
+                prev_last_problem = None;
+            }
             
             // Get or create page
             let page = match self.db.get_or_create_page(book_id, page_num).await {
@@ -141,7 +207,7 @@ impl BatchProcessor {
             // Update page OCR
             let _ = self
                 .db
-                .update_page_ocr(&page.id, &page_text, parse_result.problems.len() as u32)
+                .update_page_ocr(&page.id, page_text, parse_result.problems.len() as u32)
                 .await;
             
             // Create problems
@@ -212,16 +278,6 @@ impl BatchProcessor {
             }
             
             processed += 1;
-            
-            // Small delay to avoid rate limiting
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-        }
-
-        if !carryover_text.trim().is_empty() {
-            log::info!(
-                "Batch OCR ended with unconsumed carryover text: {} chars",
-                carryover_text.len()
-            );
         }
         
         let duration = start_time.elapsed().as_secs();

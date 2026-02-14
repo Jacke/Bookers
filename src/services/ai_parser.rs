@@ -304,6 +304,81 @@ except Exception as e:
             }
         }
     }
+
+    /// Extract the "tail" of a problem that continues to next page.
+    /// This returns the portion of content that should be prepended to the next page's continuation.
+    pub fn extract_continuation_tail(&self, problem: &ParsedProblem) -> Option<String> {
+        if !problem.continues_to_next {
+            return None;
+        }
+
+        let content = problem.content.trim();
+        if content.is_empty() {
+            return None;
+        }
+
+        let lines: Vec<&str> = content.lines().collect();
+        if lines.len() < 2 {
+            return None;
+        }
+
+        let last_line = lines.last().unwrap().trim();
+        if last_line.ends_with('.') || last_line.ends_with(';') || last_line.ends_with('!') || last_line.ends_with('?') {
+            return None;
+        }
+
+        let tail = lines[1..].join("\n").trim().to_string();
+        if tail.is_empty() {
+            None
+        } else {
+            Some(tail)
+        }
+    }
+
+    /// Merge content from previous page with current problem content.
+    /// Returns new content with previous tail prepended.
+    pub fn merge_with_prev_content(&self, current_content: &str, prev_tail: Option<&str>) -> String {
+        match prev_tail {
+            Some(tail) if !tail.is_empty() => {
+                format!("{}\n\n{}", tail, current_content)
+            }
+            _ => current_content.to_string(),
+        }
+    }
+
+    /// Process a list of problems with cross-page context from previous and next pages.
+    /// This handles both marking and content merging.
+    pub fn process_cross_page(&self,
+                              prev_problem: Option<&ParsedProblem>,
+                              prev_continuation_tail: Option<&str>,
+                              current_problems: &mut Vec<ParsedProblem>,
+                              next_problems: Option<&[ParsedProblem]>) {
+        // Merge with previous page content
+        if let Some(first) = current_problems.first_mut() {
+            if let Some(prev) = prev_problem {
+                if first.number == prev.number {
+                    first.continues_from_prev = true;
+                    if let Some(tail) = prev_continuation_tail {
+                        first.content = self.merge_with_prev_content(&first.content, Some(tail));
+                    }
+                }
+            }
+        }
+
+        // Mark and extract tail for next page
+        if let Some(next) = next_problems {
+            if let Some(current_last) = current_problems.last() {
+                if let Some(next_first) = next.first() {
+                    if current_last.number == next_first.number {
+                        // Mark current as continuing
+                        if let Some(last) = current_problems.last_mut() {
+                            last.continues_to_next = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Deterministic parser for `algebra-7` OCR output.

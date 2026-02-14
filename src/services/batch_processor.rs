@@ -63,6 +63,9 @@ impl BatchProcessor {
         let mut processed = 0u32;
         let mut total_problems = 0u32;
         let mut errors = Vec::new();
+        // Tail text detected at page boundary (e.g. "Глава 5...") that should be
+        // parsed with the next page, not appended to the last problem of current page.
+        let mut carryover_text = String::new();
         
         // Get book info
         let _book = match self.db.get_book(book_id).await {
@@ -103,9 +106,17 @@ impl BatchProcessor {
                     continue;
                 }
             };
+
+            let merged_text = if carryover_text.is_empty() {
+                ocr_text
+            } else {
+                format!("{}\n\n{}", carryover_text, ocr_text)
+            };
+            let (page_text, next_carryover) = split_trailing_chapter_heading(&merged_text);
+            carryover_text = next_carryover.unwrap_or_default();
             
             // Parse problems
-            let parse_result = match parser.parse_text(book_id, &ocr_text, Some(page_num)).await {
+            let parse_result = match parser.parse_text(book_id, &page_text, Some(page_num)).await {
                 Ok(r) => r,
                 Err(e) => {
                     errors.push(format!("Page {}: Parse failed - {}", page_num, e));
@@ -128,7 +139,10 @@ impl BatchProcessor {
             let _ = self.db.delete_problems_by_page(&page.id).await;
             
             // Update page OCR
-            let _ = self.db.update_page_ocr(&page.id, &ocr_text, parse_result.problems.len() as u32).await;
+            let _ = self
+                .db
+                .update_page_ocr(&page.id, &page_text, parse_result.problems.len() as u32)
+                .await;
             
             // Create problems
             let chapter_num: u32 = chapter_id.split(':').last()
@@ -201,6 +215,13 @@ impl BatchProcessor {
             
             // Small delay to avoid rate limiting
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        }
+
+        if !carryover_text.trim().is_empty() {
+            log::info!(
+                "Batch OCR ended with unconsumed carryover text: {} chars",
+                carryover_text.len()
+            );
         }
         
         let duration = start_time.elapsed().as_secs();
@@ -331,4 +352,78 @@ fn extract_formulas(text: &str) -> Vec<String> {
         formulas.push(cap[1].to_string());
     }
     formulas
+}
+
+fn split_trailing_chapter_heading(text: &str) -> (String, Option<String>) {
+    let lines: Vec<&str> = text.lines().collect();
+    let Some(last_non_empty_idx) = lines.iter().rposition(|l| !l.trim().is_empty()) else {
+        return (String::new(), None);
+    };
+
+    if !is_chapter_heading_line(lines[last_non_empty_idx]) {
+        return (text.trim().to_string(), None);
+    }
+
+    let current = lines[..last_non_empty_idx].join("\n").trim().to_string();
+    let carryover = lines[last_non_empty_idx..].join("\n").trim().to_string();
+
+    if carryover.is_empty() {
+        (current, None)
+    } else {
+        (current, Some(carryover))
+    }
+}
+
+fn is_chapter_heading_line(line: &str) -> bool {
+    let lower = line.trim().to_lowercase();
+    let Some(rest) = lower.strip_prefix("глава") else {
+        return false;
+    };
+
+    let rest = rest.trim_start();
+    if rest.is_empty() {
+        return false;
+    }
+
+    let chapter_token: String = rest
+        .chars()
+        .take_while(|c| !c.is_whitespace() && *c != '.' && *c != ':')
+        .collect();
+
+    if chapter_token.is_empty() {
+        return false;
+    }
+
+    let is_digits = chapter_token.chars().all(|c| c.is_ascii_digit());
+    let is_roman = chapter_token
+        .chars()
+        .all(|c| matches!(c, 'i' | 'v' | 'x' | 'l' | 'c' | 'd' | 'm'));
+
+    is_digits || is_roman
+}
+
+#[cfg(test)]
+mod tests {
+    use super::split_trailing_chapter_heading;
+
+    #[test]
+    fn splits_trailing_chapter_header_into_carryover() {
+        let text = "702. Последняя задача.\nГлава 5. Разложение многочленов на множители";
+        let (page_text, carryover) = split_trailing_chapter_heading(text);
+
+        assert_eq!(page_text, "702. Последняя задача.");
+        assert_eq!(
+            carryover.as_deref(),
+            Some("Глава 5. Разложение многочленов на множители")
+        );
+    }
+
+    #[test]
+    fn leaves_text_intact_without_trailing_chapter_header() {
+        let text = "701. Обычная задача без заголовка главы.";
+        let (page_text, carryover) = split_trailing_chapter_heading(text);
+
+        assert_eq!(page_text, text);
+        assert!(carryover.is_none());
+    }
 }

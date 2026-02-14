@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use base64::Engine;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
+use tokio::time::{sleep, Duration};
 
 /// OCR Service for running OCR on images
 #[derive(Clone)]
@@ -32,32 +33,84 @@ impl OcrService {
             "python3"
         };
         
-        let output = tokio::task::spawn_blocking({
-            let path = image_path.to_path_buf();
-            let py = python_path.to_string();
-            let prov = provider.to_string();
-            move || {
-                std::process::Command::new(&py)
-                    .arg("ocr.py")
-                    .arg(&path)
-                    .arg("-p")
-                    .arg(&prov)
-                    .output()
+        const MAX_ATTEMPTS: usize = 3;
+        let mut last_error = String::new();
+
+        for attempt in 1..=MAX_ATTEMPTS {
+            let output = tokio::task::spawn_blocking({
+                let path = image_path.to_path_buf();
+                let py = python_path.to_string();
+                let prov = provider.to_string();
+                move || {
+                    std::process::Command::new(&py)
+                        .arg("ocr.py")
+                        .arg(&path)
+                        .arg("-p")
+                        .arg(&prov)
+                        .output()
+                }
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("Task join error: {}", e))?;
+
+            let output = output.map_err(|e| anyhow::anyhow!("Failed to run OCR: {}", e))?;
+
+            if output.status.success() {
+                let text = String::from_utf8_lossy(&output.stdout);
+                return Ok(text.trim().to_string());
             }
-        })
-        .await
-        .map_err(|e| anyhow::anyhow!("Task join error: {}", e))?;
-        
-        let output = output.map_err(|e| anyhow::anyhow!("Failed to run OCR: {}", e))?;
-        
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(anyhow::anyhow!("OCR script error: {}", stderr));
+
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            last_error = if stderr.is_empty() {
+                format!("OCR script exited with status {}", output.status)
+            } else {
+                format!("OCR script error: {}", stderr)
+            };
+
+            if attempt < MAX_ATTEMPTS && is_transient_ocr_error(&last_error) {
+                // Short exponential backoff for flaky upstream OCR/network issues.
+                let delay_ms = 800u64 * (attempt as u64);
+                log::warn!(
+                    "OCR attempt {}/{} failed for provider '{}': {}. Retrying in {}ms...",
+                    attempt,
+                    MAX_ATTEMPTS,
+                    provider,
+                    last_error,
+                    delay_ms
+                );
+                sleep(Duration::from_millis(delay_ms)).await;
+                continue;
+            }
+
+            return Err(anyhow::anyhow!(last_error));
         }
-        
-        let text = String::from_utf8_lossy(&output.stdout);
-        Ok(text.trim().to_string())
+
+        Err(anyhow::anyhow!(last_error))
     }
+}
+
+fn is_transient_ocr_error(err: &str) -> bool {
+    let e = err.to_lowercase();
+    [
+        "server disconnected without sending a response",
+        "connection reset",
+        "connection aborted",
+        "connection closed",
+        "timed out",
+        "timeout",
+        "temporarily unavailable",
+        "service unavailable",
+        "bad gateway",
+        "gateway timeout",
+        "too many requests",
+        "rate limit",
+        "429",
+        "502",
+        "503",
+        "504",
+    ]
+    .iter()
+    .any(|needle| e.contains(needle))
 }
 
 #[async_trait]

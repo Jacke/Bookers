@@ -1,11 +1,10 @@
 use actix_web::{web, Error, HttpResponse};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
-use std::process::Command;
 
 use crate::config::Config;
 use crate::services::database::Database;
 use crate::services::ai_parser::HybridParser;
+use crate::services::OcrService;
 use crate::services::page_parser::{PageContentParser, convert_to_models};
 use crate::models::{Problem, Book};
 
@@ -107,8 +106,9 @@ pub async fn ocr_pdf_page(
         })));
     };
     
-    // Run OCR using Python script
-    let ocr_result = match run_ocr(&image_path, provider).await {
+    // Run OCR using the shared OCR service (supports provider selection and retries).
+    let ocr_service = OcrService::new(config.preview_dir.clone());
+    let ocr_result = match ocr_service.run_ocr(&image_path, provider).await {
         Ok(text) => text,
         Err(e) => {
             log::error!("OCR failed: {}", e);
@@ -123,52 +123,6 @@ pub async fn ocr_pdf_page(
         text: ocr_result,
         provider: provider.to_string(),
     }))
-}
-
-async fn run_ocr(image_path: &Path, _provider: &str) -> anyhow::Result<String> {
-    // Check for valid API key
-    let has_valid_key = match std::env::var("MISTRAL_API_KEY") {
-        Ok(key) => !key.is_empty() && !key.contains("your_") && key.len() > 20,
-        Err(_) => false,
-    };
-    
-    if !has_valid_key {
-        return Err(anyhow::anyhow!("MISTRAL_API_KEY not set or invalid"));
-    }
-    
-    // Try to use venv python first
-    let python_path = if std::path::Path::new(".venv/bin/python").exists() {
-        ".venv/bin/python"
-    } else if std::path::Path::new(".venv/bin/python3").exists() {
-        ".venv/bin/python3"
-    } else {
-        "python3"
-    };
-    
-    let output = tokio::task::spawn_blocking({
-        let path = image_path.to_path_buf();
-        let py = python_path.to_string();
-        move || {
-            Command::new(&py)
-                .arg("ocr.py")
-                .arg(&path)
-                .arg("-p")
-                .arg("mistral")
-                .output()
-        }
-    })
-    .await
-    .map_err(|e| anyhow::anyhow!("Task join error: {}", e))?;
-    
-    let output = output.map_err(|e| anyhow::anyhow!("Failed to run OCR: {}", e))?;
-    
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow::anyhow!("OCR script error: {}", stderr));
-    }
-    
-    let text = String::from_utf8_lossy(&output.stdout);
-    Ok(text.trim().to_string())
 }
 
 /// Parse problems from OCR text using hybrid AI+regex parser
@@ -420,8 +374,14 @@ pub async fn get_page_ocr(
                 "problem_count": page.problem_count,
             })))
         }
-        Ok(None) => Ok(HttpResponse::NotFound().json(serde_json::json!({
-            "error": "Page not found"
+        // First visit to a page may have no OCR record yet; return empty state instead of 404.
+        Ok(None) => Ok(HttpResponse::Ok().json(serde_json::json!({
+            "page_id": format!("{}:page:{}", book_id, page_number),
+            "page_number": page_number,
+            "has_ocr": false,
+            "ocr_text": "",
+            "has_problems": false,
+            "problem_count": 0,
         }))),
         Err(e) => {
             log::error!("Failed to get page OCR: {}", e);

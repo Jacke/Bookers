@@ -334,6 +334,15 @@ mod algebra7_parser {
                 continue;
             }
 
+            // Chapter header often appears at page boundary and should not be appended
+            // to the previous problem content.
+            if is_chapter_heading_line(line) {
+                if let Some(pb) = current.take() {
+                    out.push(pb.finish());
+                }
+                continue;
+            }
+
             // Main problem start:
             // - `71. ...`
             // - `Задача 1. ...` / `Задача 1: ...`
@@ -363,6 +372,34 @@ mod algebra7_parser {
         }
 
         AIParseResult { problems: out }
+    }
+
+    fn is_chapter_heading_line(line: &str) -> bool {
+        let lower = line.trim().to_lowercase();
+        let Some(rest) = lower.strip_prefix("глава") else {
+            return false;
+        };
+
+        let rest = rest.trim_start();
+        if rest.is_empty() {
+            return false;
+        }
+
+        let chapter_token: String = rest
+            .chars()
+            .take_while(|c| !c.is_whitespace() && *c != '.' && *c != ':')
+            .collect();
+
+        if chapter_token.is_empty() {
+            return false;
+        }
+
+        let is_digits = chapter_token.chars().all(|c| c.is_ascii_digit());
+        let is_roman = chapter_token
+            .chars()
+            .all(|c| matches!(c, 'i' | 'v' | 'x' | 'l' | 'c' | 'd' | 'm'));
+
+        is_digits || is_roman
     }
 
     fn parse_main_problem_start(line: &str) -> Option<(String, String)> {
@@ -595,6 +632,22 @@ a) 2+2
             assert!(res.problems[0].content.starts_with("Завод"));
             assert_eq!(res.problems[1].number, "2");
             assert!(res.problems[1].content.starts_with("Ширина"));
+        }
+
+        #[test]
+        fn strips_chapter_header_from_previous_problem_tail() {
+            let text = r#"
+702. Трёхзначное число оканчивается цифрой 6.
+Если её зачеркнуть, то полученное число будет меньше данного на 366.
+Найдите данное трёхзначное число.
+Глава 5. Разложение многочленов на множители
+"#;
+
+            let res = parse(text);
+            assert_eq!(res.problems.len(), 1);
+            let content = &res.problems[0].content;
+            assert!(!content.contains("Глава 5"));
+            assert!(content.contains("Найдите данное трёхзначное число."));
         }
     }
 }

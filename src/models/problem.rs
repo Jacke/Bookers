@@ -50,7 +50,7 @@ pub struct Problem {
     #[serde(default)]
     pub is_cross_page: bool,
     /// Is this problem bookmarked/favorited?
-    #[serde(skip_serializing_if = "Bool::is_false", default)]
+    #[serde(default)]
     pub is_bookmarked: bool,
 }
 

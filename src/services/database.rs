@@ -140,6 +140,16 @@ impl Database {
             );
 
             CREATE INDEX IF NOT EXISTS idx_bookmarks_problem ON bookmarks(problem_id);
+
+            CREATE TABLE IF NOT EXISTS view_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                problem_id TEXT NOT NULL,
+                viewed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (problem_id) REFERENCES problems(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_view_history_problem ON view_history(problem_id);
+            CREATE INDEX IF NOT EXISTS idx_view_history_date ON view_history(viewed_at DESC);
             "#
         )
         .execute(&self.pool)
@@ -902,6 +912,46 @@ impl Database {
         Ok(row.is_some())
     }
 
+    /// Record a problem view in history
+    pub async fn add_view_history(&self, problem_id: &str) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO view_history (problem_id) VALUES (?1)"
+        )
+        .bind(problem_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Get recently viewed problems
+    pub async fn get_view_history(&self, limit: usize) -> Result<Vec<Problem>> {
+        let rows = sqlx::query_as::<_, ProblemRow>(
+            r#"SELECT p.* FROM problems p
+               INNER JOIN (
+                   SELECT problem_id, MAX(viewed_at) as last_view
+                   FROM view_history
+                   GROUP BY problem_id
+                   ORDER BY last_view DESC
+                   LIMIT ?1
+               ) h ON p.id = h.problem_id"#
+        )
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.into_iter().map(|r| r.into()).collect())
+    }
+
+    /// Clear view history
+    pub async fn clear_view_history(&self) -> Result<()> {
+        sqlx::query("DELETE FROM view_history")
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
     // === Search Operations ===
 
     pub async fn search_by_formula(&self, formula: &str, limit: usize) -> Result<Vec<Problem>> {
@@ -1013,6 +1063,7 @@ impl From<ProblemRow> for Problem {
             continues_from_page: row.continues_from_page.map(|p| p as u32),
             continues_to_page: row.continues_to_page.map(|p| p as u32),
             is_cross_page: row.is_cross_page.unwrap_or(false),
+            is_bookmarked: false,
         }
     }
 }
@@ -1184,6 +1235,7 @@ mod tests {
                 continues_from_page: None,
                 continues_to_page: None,
                 is_cross_page: false,
+            is_bookmarked: false,
             },
             Problem {
                 id: p2_id.clone(),
@@ -1203,6 +1255,7 @@ mod tests {
                 continues_from_page: None,
                 continues_to_page: None,
                 is_cross_page: false,
+            is_bookmarked: false,
             },
             Problem {
                 id: format!("{}:a", p1_id),
@@ -1222,6 +1275,7 @@ mod tests {
                 continues_from_page: None,
                 continues_to_page: None,
                 is_cross_page: false,
+            is_bookmarked: false,
             },
             Problem {
                 id: format!("{}:a", p2_id),
@@ -1241,6 +1295,7 @@ mod tests {
                 continues_from_page: None,
                 continues_to_page: None,
                 is_cross_page: false,
+            is_bookmarked: false,
             },
         ];
 
@@ -1337,6 +1392,7 @@ mod tests {
                 continues_from_page: None,
                 continues_to_page: None,
                 is_cross_page: false,
+            is_bookmarked: false,
             },
             Problem {
                 id: p2_id.clone(),
@@ -1356,6 +1412,7 @@ mod tests {
                 continues_from_page: None,
                 continues_to_page: None,
                 is_cross_page: false,
+            is_bookmarked: false,
             },
             Problem {
                 id: format!("{}:a", p1_id),
@@ -1375,6 +1432,7 @@ mod tests {
                 continues_from_page: None,
                 continues_to_page: None,
                 is_cross_page: false,
+            is_bookmarked: false,
             },
             Problem {
                 id: format!("{}:a", p2_id),
@@ -1394,6 +1452,7 @@ mod tests {
                 continues_from_page: None,
                 continues_to_page: None,
                 is_cross_page: false,
+            is_bookmarked: false,
             },
         ];
 

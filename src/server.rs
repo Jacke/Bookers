@@ -200,6 +200,18 @@ fn configure_routes(cfg: &mut web::ServiceConfig) {
         .route(
             "/api/bookmarks",
             web::get().to(handlers::list_bookmarks),
+        )
+        .route(
+            "/api/history/view/{problem_id}",
+            web::post().to(handlers::record_view),
+        )
+        .route(
+            "/api/history",
+            web::get().to(handlers::get_view_history),
+        )
+        .route(
+            "/api/history",
+            web::delete().to(handlers::clear_view_history),
         );
     
     // Batch processing routes

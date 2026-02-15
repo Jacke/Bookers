@@ -73,10 +73,14 @@ impl BatchProcessor {
         let parser = HybridParser::new(std::env::var("MISTRAL_API_KEY").ok());
         let ocr_service = OcrService::new(self.config.preview_dir.clone());
         
-        // === FIRST PASS: OCR all pages ===
-        self.job_manager.update_progress(job_id, 0.0, "Running OCR on all pages...").await;
+        // === FIRST PASS: OCR all pages (parallel with semaphore) ===
+        self.job_manager.update_progress(job_id, 0.0, "Running parallel OCR...").await;
         
         let mut all_ocr_texts: Vec<Option<String>> = vec![None; total_pages as usize];
+        
+        use tokio::sync::Semaphore;
+        let semaphore = Arc::new(Semaphore::new(4));
+        let mut handles = Vec::new();
         
         for (idx, page_num) in (start_page..=end_page).enumerate() {
             if let Some(job) = self.job_manager.get_job(job_id).await {
@@ -85,46 +89,48 @@ impl BatchProcessor {
                 }
             }
             
-            let progress = (idx as f32 / total_pages as f32) * 50.0;
-            self.job_manager.update_progress(
-                job_id,
-                progress,
-                &format!("OCR: page {} of {}", page_num, end_page)
-            ).await;
+            let ocr_service = ocr_service.clone();
+            let db = Arc::clone(&self.db);
+            let book_id = book_id.to_string();
+            let config = Arc::clone(&self.config);
+            let sem = Arc::clone(&semaphore);
             
-            // Check for cached OCR in database first
-            let cached_ocr = match self.db.get_page(book_id, page_num).await {
-                Ok(Some(page)) if page.ocr_text.is_some() && !page.ocr_text.as_ref().unwrap().is_empty() => {
-                    log::info!("Using cached OCR for page {}", page_num);
-                    page.ocr_text
+            let handle = tokio::spawn(async move {
+                let _permit = sem.acquire().await.unwrap();
+                
+                if let Ok(Some(page)) = db.get_page(&book_id, page_num).await {
+                    if page.ocr_text.is_some() && !page.ocr_text.as_ref().unwrap().is_empty() {
+                        return (idx, Some(page.ocr_text.unwrap()));
+                    }
                 }
-                _ => None,
-            };
-            
-            if let Some(text) = cached_ocr {
-                all_ocr_texts[idx] = Some(text);
-            } else {
-                // Run OCR if not cached
-                let filename = format!("{}.pdf", book_id);
-                let image_path = self.config.preview_dir.join(format!("{}_{}.png", filename, page_num));
+                
+                let filename = format!("{}.pdf", &book_id);
+                let image_path = config.preview_dir.join(format!("{}_{}.png", filename, page_num));
                 
                 match ocr_service.run_ocr(&image_path, "mistral").await {
                     Ok(text) => {
-                        all_ocr_texts[idx] = Some(text.clone());
-                        // Save OCR to database for future use
-                        if let Ok(page) = self.db.get_or_create_page(book_id, page_num).await {
-                            let _ = self.db.update_page_ocr(&page.id, &text, 0).await;
+                        if let Ok(page) = db.get_or_create_page(&book_id, page_num).await {
+                            let _ = db.update_page_ocr(&page.id, &text, 0).await;
                         }
+                        (idx, Some(text))
                     }
                     Err(e) => {
                         log::warn!("OCR failed for page {}: {}", page_num, e);
-                        all_ocr_texts[idx] = None;
+                        (idx, None)
                     }
                 }
-            }
-            
-            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            });
+            handles.push(handle);
         }
+        
+        for handle in handles {
+            if let Ok((idx, text)) = handle.await {
+                all_ocr_texts[idx] = text;
+            }
+        }
+        
+        let cached = all_ocr_texts.iter().filter(|t| t.is_some()).count();
+        log::info!("Parallel OCR done: {}/{} pages", cached, total_pages);
         
         // === Process chapter headings (carryover between pages) ===
         let mut processed_ocr_texts: Vec<(String, Option<String>)> = Vec::new();

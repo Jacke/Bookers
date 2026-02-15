@@ -376,6 +376,59 @@ pub async fn get_chapter_theory(
     }
 }
 
+/// Record problem view in history
+pub async fn record_view(
+    path: web::Path<String>,
+    db: web::Data<Database>,
+) -> Result<HttpResponse, Error> {
+    let problem_id = path.into_inner();
+    
+    match db.add_view_history(&problem_id).await {
+        Ok(_) => Ok(HttpResponse::Ok().json(serde_json::json!({
+            "success": true,
+            "problem_id": problem_id,
+        }))),
+        Err(e) => {
+            log::error!("Failed to record view: {}", e);
+            Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": format!("Failed to record view: {}", e)
+            })))
+        }
+    }
+}
+
+/// Get view history
+pub async fn get_view_history(
+    db: web::Data<Database>,
+) -> Result<HttpResponse, Error> {
+    match db.get_view_history(50).await {
+        Ok(problems) => Ok(HttpResponse::Ok().json(problems)),
+        Err(e) => {
+            log::error!("Failed to get view history: {}", e);
+            Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": format!("Failed to get view history: {}", e)
+            })))
+        }
+    }
+}
+
+/// Clear view history
+pub async fn clear_view_history(
+    db: web::Data<Database>,
+) -> Result<HttpResponse, Error> {
+    match db.clear_view_history().await {
+        Ok(_) => Ok(HttpResponse::Ok().json(serde_json::json!({
+            "success": true,
+        }))),
+        Err(e) => {
+            log::error!("Failed to clear view history: {}", e);
+            Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": format!("Failed to clear view history: {}", e)
+            })))
+        }
+    }
+}
+
 /// Update problem content (e.g., from OCR import)
 pub async fn update_problem(
     path: web::Path<String>,

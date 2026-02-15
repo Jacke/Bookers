@@ -182,8 +182,24 @@ fn configure_routes(cfg: &mut web::ServiceConfig) {
             web::post().to(handlers::rate_solution),
         )
         .route(
+            "/api/problems/{problem_id}/hint",
+            web::post().to(handlers::hint_problem),
+        )
+        .route(
             "/api/import",
             web::post().to(handlers::import_textbook),
+        )
+        .route(
+            "/api/bookmarks/{problem_id}",
+            web::post().to(handlers::add_bookmark),
+        )
+        .route(
+            "/api/bookmarks/{problem_id}",
+            web::delete().to(handlers::remove_bookmark),
+        )
+        .route(
+            "/api/bookmarks",
+            web::get().to(handlers::list_bookmarks),
         );
     
     // Batch processing routes

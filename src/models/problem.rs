@@ -8,7 +8,7 @@ pub type TheoryId = String;
 pub type SolutionId = String;
 
 /// Represents a math problem extracted from textbook
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Problem {
     pub id: ProblemId,
     pub chapter_id: String,
@@ -49,6 +49,9 @@ pub struct Problem {
     /// Is this problem split across multiple pages?
     #[serde(default)]
     pub is_cross_page: bool,
+    /// Is this problem bookmarked/favorited?
+    #[serde(skip_serializing_if = "Bool::is_false", default)]
+    pub is_bookmarked: bool,
 }
 
 /// Represents a PDF page with OCR text
@@ -87,13 +90,13 @@ pub struct TheoryBlock {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TheoryType {
-    Definition,    // Определение
-    Theorem,       // Теорема
-    Proof,         // Доказательство
-    Property,      // Свойство
-    Formula,       // Формула
-    Explanation,   // Пояснение
-    Example,       // Пример
+    Definition,  // Определение
+    Theorem,     // Теорема
+    Proof,       // Доказательство
+    Property,    // Свойство
+    Formula,     // Формула
+    Explanation, // Пояснение
+    Example,     // Пример
     Other,
 }
 
@@ -234,27 +237,28 @@ mod tests {
         assert_eq!(id, "algebra-7:3:15");
     }
 
-	    #[test]
-	    fn test_formula_extraction() {
-	        let problem = Problem {
-	            id: "test".to_string(),
-	            chapter_id: "test".to_string(),
-	            page_id: None,
-	            parent_id: None,
-	            number: "1".to_string(),
-	            display_name: "Test".to_string(),
-	            content: "Solve $x^2 + y^2 = z^2$ and $$\\int_0^1 x dx$$".to_string(),
-	            latex_formulas: vec![],
-	            page_number: None,
-	            difficulty: None,
-	            has_solution: false,
-	            created_at: Utc::now(),
-	            solution: None,
-	            sub_problems: None,
-	            continues_from_page: None,
-	            continues_to_page: None,
-	            is_cross_page: false,
-	        };
+    #[test]
+    fn test_formula_extraction() {
+        let problem = Problem {
+            id: "test".to_string(),
+            chapter_id: "test".to_string(),
+            page_id: None,
+            parent_id: None,
+            number: "1".to_string(),
+            display_name: "Test".to_string(),
+            content: "Solve $x^2 + y^2 = z^2$ and $$\\int_0^1 x dx$$".to_string(),
+            latex_formulas: vec![],
+            page_number: None,
+            difficulty: None,
+            has_solution: false,
+            created_at: Utc::now(),
+            solution: None,
+            sub_problems: None,
+            continues_from_page: None,
+            continues_to_page: None,
+            is_cross_page: false,
+            is_bookmarked: false,
+        };
 
         let formulas = problem.extract_formulas();
         assert!(formulas.contains(&"x^2 + y^2 = z^2".to_string()));

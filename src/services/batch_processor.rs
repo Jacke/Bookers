@@ -276,6 +276,7 @@ impl BatchProcessor {
                         Some(page_num + 1) 
                     } else { None },
                     is_cross_page: ai_problem.continues_from_prev || ai_problem.continues_to_next,
+                    is_bookmarked: false,
                 };
                 
                 problems_to_create.push(main_problem);
@@ -302,6 +303,7 @@ impl BatchProcessor {
                         continues_from_page: None,
                         continues_to_page: None,
                         is_cross_page: false,
+                        is_bookmarked: false,
                     };
                     problems_to_create.push(sub_problem);
                 }

@@ -34,7 +34,8 @@ impl TextbookParser {
             // Упражнение 5: ...
             Regex::new(r"(?im)^\s*#*\s*Упражнение\s*[№#]?\s*(\d+)[:.\s)]+").unwrap(),
             // Example 1: ... Problem 1: ...
-            Regex::new(r"(?im)^\s*#*\s*(?:Example|Problem|Exercise)\s*[№#]?\s*(\d+)[:.\s)]+").unwrap(),
+            Regex::new(r"(?im)^\s*#*\s*(?:Example|Problem|Exercise)\s*[№#]?\s*(\d+)[:.\s)]+")
+                .unwrap(),
             // 1) ... 1. ... 1) $formula$ ...
             Regex::new(r"(?m)^\s*(\d+[\.\d]*)\s*[\.)\]]\s*(?:\$|[А-ЯA-Z])").unwrap(),
             // №125 или #125
@@ -62,9 +63,9 @@ impl TextbookParser {
         let patterns = [
             r"(?i)^\s*([а-яё])\s*[\.\)\]]",
             r"(?i)^\s*([a-z])\s*[\.\)\]]",
-            r"(?i)^\s*\(([а-яёa-z])\)",  // (а) or (a)
+            r"(?i)^\s*\(([а-яёa-z])\)", // (а) or (a)
         ];
-        
+
         for pattern in &patterns {
             if let Ok(re) = Regex::new(pattern) {
                 if let Some(caps) = re.captures(line) {
@@ -94,7 +95,7 @@ impl TextbookParser {
         let mut _problem_counter = 0u32;
         let mut theory_counter = 0u32;
         let mut current_page: Option<u32> = None;
-        
+
         // Page number patterns
         let page_pattern = regex::Regex::new(r"(?i)(?:страница|стр\.?|page)\s*(\d+)").unwrap();
 
@@ -103,7 +104,7 @@ impl TextbookParser {
             if trimmed.is_empty() {
                 continue;
             }
-            
+
             // Check for page number indicator
             if let Some(caps) = page_pattern.captures(trimmed) {
                 if let Some(page_num) = caps.get(1) {
@@ -273,12 +274,12 @@ impl SubProblemBuilder {
             content: first_line.to_string(),
         }
     }
-    
+
     fn add_line(&mut self, line: &str) {
         self.content.push('\n');
         self.content.push_str(line);
     }
-    
+
     fn build(self, parent_id: &str) -> Problem {
         let id = format!("{}:{}", parent_id, self.letter);
         let formulas = extract_formulas(&self.content);
@@ -300,6 +301,7 @@ impl SubProblemBuilder {
             continues_from_page: None,
             continues_to_page: None,
             is_cross_page: false,
+            is_bookmarked: false,
         }
     }
 }
@@ -328,7 +330,7 @@ impl ProblemBuilder {
         self.content.push('\n');
         self.content.push_str(line);
     }
-    
+
     fn start_sub_problem(&mut self, letter: String, line: &str) {
         // Save current sub-problem if exists
         if let Some(sub) = self.current_sub.take() {
@@ -336,13 +338,13 @@ impl ProblemBuilder {
         }
         self.current_sub = Some(SubProblemBuilder::new(letter, line));
     }
-    
+
     fn add_line_to_sub(&mut self, line: &str) {
         if let Some(ref mut sub) = self.current_sub {
             sub.add_line(line);
         }
     }
-    
+
     fn finish_sub_problems(&mut self) {
         if let Some(sub) = self.current_sub.take() {
             self.sub_problems.push(sub);
@@ -352,13 +354,18 @@ impl ProblemBuilder {
     fn build(mut self, book_id: &str, chapter_num: u32) -> Problem {
         self.finish_sub_problems();
         let id = Problem::generate_id(book_id, chapter_num, &self.number);
-        
+
         let sub_problems = if self.sub_problems.is_empty() {
             None
         } else {
-            Some(self.sub_problems.into_iter().map(|s| s.build(&id)).collect())
+            Some(
+                self.sub_problems
+                    .into_iter()
+                    .map(|s| s.build(&id))
+                    .collect(),
+            )
         };
-        
+
         Problem {
             id: id.clone(),
             chapter_id: format!("{}:{}", book_id, chapter_num),
@@ -377,6 +384,7 @@ impl ProblemBuilder {
             continues_from_page: None,
             continues_to_page: None,
             is_cross_page: false,
+            is_bookmarked: false,
         }
     }
 }
@@ -456,9 +464,13 @@ mod tests {
     fn test_detect_problem() {
         let parser = TextbookParser::new();
 
-        assert!(parser.detect_problem_start("Задача 1: Решить уравнение").is_some());
+        assert!(parser
+            .detect_problem_start("Задача 1: Решить уравнение")
+            .is_some());
         assert!(parser.detect_problem_start("Задача №5. Найти").is_some());
-        assert!(parser.detect_problem_start("1. Вычислить интеграл").is_some());
+        assert!(parser
+            .detect_problem_start("1. Вычислить интеграл")
+            .is_some());
         assert!(parser.detect_problem_start("1) $x^2 + 3$").is_some());
         assert!(parser.detect_problem_start("№125. Решить").is_some());
     }
@@ -467,8 +479,12 @@ mod tests {
     fn test_detect_theory() {
         let parser = TextbookParser::new();
 
-        assert!(parser.detect_theory_start("Теорема 1: О сумме углов").is_some());
-        assert!(parser.detect_theory_start("Определение: Производная").is_some());
+        assert!(parser
+            .detect_theory_start("Теорема 1: О сумме углов")
+            .is_some());
+        assert!(parser
+            .detect_theory_start("Определение: Производная")
+            .is_some());
     }
 
     #[test]

@@ -867,6 +867,7 @@ pub fn convert_to_models(
                     continues_from_page: None,
                     continues_to_page: None,
                     is_cross_page: false,
+                    is_bookmarked: false,
                 });
             }
             PageElement::Theory(t) => {

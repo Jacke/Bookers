@@ -10,6 +10,8 @@ use std::collections::HashMap;
 pub trait SolutionProvider: Send + Sync {
     /// Generate solution for a problem
     async fn solve(&self, problem: &Problem, context: &str) -> anyhow::Result<String>;
+    /// Generate a hint for a problem
+    async fn hint(&self, problem: &Problem, context: &str, hint_level: u8) -> anyhow::Result<String>;
     /// Provider name
     fn name(&self) -> &'static str;
 }
@@ -92,6 +94,23 @@ impl AISolver {
         })
     }
 
+    /// Generate hint for a problem
+    pub async fn hint(
+        &self,
+        problem: &Problem,
+        provider: Option<&str>,
+        theory_context: Option<&str>,
+        hint_level: u8,
+    ) -> anyhow::Result<String> {
+        let provider_name = provider.unwrap_or(&self.default_provider);
+        let provider = self.providers
+            .get(provider_name)
+            .ok_or_else(|| anyhow::anyhow!("Provider {} not available", provider_name))?;
+
+        let context = theory_context.unwrap_or("");
+        provider.hint(problem, context, hint_level).await
+    }
+
     /// List available providers
     pub fn available_providers(&self) -> Vec<&str> {
         self.providers.keys().map(|s| s.as_str()).collect()
@@ -155,6 +174,46 @@ impl SolutionProvider for OpenAIProvider {
         Ok(content)
     }
 
+    async fn hint(&self, problem: &Problem, context: &str, hint_level: u8) -> anyhow::Result<String> {
+        let prompt = build_hint_prompt(&problem.content, context, hint_level);
+
+        let request_body = serde_json::json!({
+            "model": "gpt-4o",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are an expert math teacher. Provide helpful hints without giving away the full solution. Use LaTeX for math formulas."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            "temperature": 0.5,
+            "max_tokens": 1024
+        });
+
+        let response = self.client
+            .post("https://api.openai.com/v1/chat/completions")
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .json(&request_body)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().await?;
+            return Err(anyhow::anyhow!("OpenAI API error: {}", error_text));
+        }
+
+        let result: Value = response.json().await?;
+        let content = result["choices"][0]["message"]["content"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("Invalid response format"))?
+            .to_string();
+
+        Ok(content)
+    }
+
     fn name(&self) -> &'static str {
         "openai"
     }
@@ -190,6 +249,44 @@ impl SolutionProvider for ClaudeProvider {
                 }
             ],
             "system": "You are an expert math teacher. Solve problems step by step, explaining each step clearly. Use LaTeX for math formulas ($...$ for inline, $$...$$ for display)."
+        });
+
+        let response = self.client
+            .post("https://api.anthropic.com/v1/messages")
+            .header("x-api-key", &self.api_key)
+            .header("anthropic-version", "2023-06-01")
+            .header("content-type", "application/json")
+            .json(&request_body)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().await?;
+            return Err(anyhow::anyhow!("Claude API error: {}", error_text));
+        }
+
+        let result: Value = response.json().await?;
+        let content = result["content"][0]["text"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("Invalid response format"))?
+            .to_string();
+
+        Ok(content)
+    }
+
+    async fn hint(&self, problem: &Problem, context: &str, hint_level: u8) -> anyhow::Result<String> {
+        let prompt = build_hint_prompt(&problem.content, context, hint_level);
+
+        let request_body = serde_json::json!({
+            "model": "claude-3-5-sonnet-20241022",
+            "max_tokens": 1024,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            "system": "You are an expert math teacher. Provide helpful hints without giving away the full solution. Use LaTeX for math formulas."
         });
 
         let response = self.client
@@ -277,6 +374,46 @@ impl SolutionProvider for MistralProvider {
         Ok(content)
     }
 
+    async fn hint(&self, problem: &Problem, context: &str, hint_level: u8) -> anyhow::Result<String> {
+        let prompt = build_hint_prompt(&problem.content, context, hint_level);
+
+        let request_body = serde_json::json!({
+            "model": "mistral-large-latest",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are an expert math teacher. Provide helpful hints without giving away the full solution. Use LaTeX for math formulas."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            "temperature": 0.5,
+            "max_tokens": 1024
+        });
+
+        let response = self.client
+            .post("https://api.mistral.ai/v1/chat/completions")
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .json(&request_body)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().await?;
+            return Err(anyhow::anyhow!("Mistral API error: {}", error_text));
+        }
+
+        let result: Value = response.json().await?;
+        let content = result["choices"][0]["message"]["content"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("Invalid response format"))?
+            .to_string();
+
+        Ok(content)
+    }
+
     fn name(&self) -> &'static str {
         "mistral"
     }
@@ -302,6 +439,38 @@ Requirements:
 6. Use Russian language for the explanation (as the problem is in Russian)
 
 Solution:"#,
+        problem,
+        if context.is_empty() { "None provided" } else { context }
+    )
+}
+
+/// Build the hint prompt based on hint level
+fn build_hint_prompt(problem: &str, context: &str, hint_level: u8) -> String {
+    let level_hint = match hint_level {
+        1 => "Provide a VERY minimal hint - just point in the right direction without specifics.",
+        2 => "Provide a moderate hint - give a clue about the approach or formula to use.",
+        3 => "Provide a strong hint - outline the steps without giving the final answer.",
+        _ => "Provide a hint appropriate for the problem.",
+    };
+
+    format!(
+        r#"Provide a helpful hint for the following math problem. {}
+
+Problem:
+{}
+
+Relevant theory/context from textbook:
+{}
+
+Requirements:
+1. Do NOT give the full solution
+2. Do NOT give the final answer
+3. Provide a hint that helps the student think in the right direction
+4. Use LaTeX for any mathematical expressions ($...$ for inline)
+5. Use Russian language
+
+Hint:"#,
+        level_hint,
         problem,
         if context.is_empty() { "None provided" } else { context }
     )

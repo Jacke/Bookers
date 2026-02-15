@@ -226,6 +226,138 @@ pub struct RateRequest {
     pub rating: u8, // 1-5
 }
 
+#[derive(Debug, Deserialize)]
+pub struct HintRequest {
+    pub hint_level: Option<u8>, // 1-3 (1=minimal, 2=moderate, 3=strong)
+    pub provider: Option<String>,
+}
+
+/// Generate hint for a problem
+pub async fn hint_problem(
+    path: web::Path<String>,
+    body: web::Json<HintRequest>,
+    db: web::Data<Database>,
+    config: web::Data<Config>,
+) -> Result<HttpResponse, Error> {
+    let problem_id = path.into_inner();
+    
+    // Get problem
+    let problem = match db.get_problem(&problem_id).await {
+        Ok(Some(p)) => p,
+        Ok(None) => return Ok(HttpResponse::NotFound().json(serde_json::json!({
+            "error": "Problem not found"
+        }))),
+        Err(e) => {
+            log::error!("Failed to get problem: {}", e);
+            return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": format!("Failed to get problem: {}", e)
+            })));
+        }
+    };
+
+    // Get theory context
+    let theory_context = db.get_theory_blocks_by_chapter(&problem.chapter_id)
+        .await
+        .ok()
+        .map(|blocks| {
+            blocks.iter()
+                .map(|t| t.content.clone())
+                .collect::<Vec<_>>()
+                .join("\n\n")
+        })
+        .unwrap_or_default();
+
+    // Generate hint
+    let solver = match AISolver::new(&config) {
+        Ok(s) => s,
+        Err(e) => {
+            return Ok(HttpResponse::ServiceUnavailable().json(serde_json::json!({
+                "error": format!("AI solver not available: {}", e)
+            })));
+        }
+    };
+
+    let hint_level = body.hint_level.unwrap_or(2).min(3).max(1);
+    
+    let hint = match solver.hint(
+        &problem,
+        body.provider.as_deref(),
+        if theory_context.is_empty() { None } else { Some(&theory_context) },
+        hint_level,
+    ).await {
+        Ok(h) => h,
+        Err(e) => {
+            log::error!("Failed to generate hint: {}", e);
+            return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": format!("Failed to generate hint: {}", e)
+            })));
+        }
+    };
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "problem_id": problem_id,
+        "hint": hint,
+        "hint_level": hint_level,
+    })))
+}
+
+/// Add problem to bookmarks
+pub async fn add_bookmark(
+    path: web::Path<String>,
+    db: web::Data<Database>,
+) -> Result<HttpResponse, Error> {
+    let problem_id = path.into_inner();
+    
+    match db.add_bookmark(&problem_id).await {
+        Ok(_) => Ok(HttpResponse::Ok().json(serde_json::json!({
+            "success": true,
+            "problem_id": problem_id,
+        }))),
+        Err(e) => {
+            log::error!("Failed to add bookmark: {}", e);
+            Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": format!("Failed to add bookmark: {}", e)
+            })))
+        }
+    }
+}
+
+/// Remove problem from bookmarks
+pub async fn remove_bookmark(
+    path: web::Path<String>,
+    db: web::Data<Database>,
+) -> Result<HttpResponse, Error> {
+    let problem_id = path.into_inner();
+    
+    match db.remove_bookmark(&problem_id).await {
+        Ok(_) => Ok(HttpResponse::Ok().json(serde_json::json!({
+            "success": true,
+            "problem_id": problem_id,
+        }))),
+        Err(e) => {
+            log::error!("Failed to remove bookmark: {}", e);
+            Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": format!("Failed to remove bookmark: {}", e)
+            })))
+        }
+    }
+}
+
+/// List all bookmarked problems
+pub async fn list_bookmarks(
+    db: web::Data<Database>,
+) -> Result<HttpResponse, Error> {
+    match db.get_bookmarked_problems().await {
+        Ok(problems) => Ok(HttpResponse::Ok().json(problems)),
+        Err(e) => {
+            log::error!("Failed to list bookmarks: {}", e);
+            Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": format!("Failed to list bookmarks: {}", e)
+            })))
+        }
+    }
+}
+
 /// Get theory blocks for a chapter
 pub async fn get_chapter_theory(
     path: web::Path<String>,

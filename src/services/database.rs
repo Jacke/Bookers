@@ -131,6 +131,15 @@ impl Database {
             );
 
             CREATE INDEX IF NOT EXISTS idx_solutions_problem ON solutions(problem_id);
+
+            CREATE TABLE IF NOT EXISTS bookmarks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                problem_id TEXT NOT NULL UNIQUE,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (problem_id) REFERENCES problems(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_bookmarks_problem ON bookmarks(problem_id);
             "#
         )
         .execute(&self.pool)
@@ -842,6 +851,55 @@ impl Database {
         .await?;
 
         Ok(())
+    }
+
+    /// Add a problem to bookmarks
+    pub async fn add_bookmark(&self, problem_id: &str) -> Result<()> {
+        sqlx::query(
+            "INSERT OR IGNORE INTO bookmarks (problem_id) VALUES (?1)"
+        )
+        .bind(problem_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Remove a problem from bookmarks
+    pub async fn remove_bookmark(&self, problem_id: &str) -> Result<()> {
+        sqlx::query(
+            "DELETE FROM bookmarks WHERE problem_id = ?1"
+        )
+        .bind(problem_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Get all bookmarked problems
+    pub async fn get_bookmarked_problems(&self) -> Result<Vec<Problem>> {
+        let rows = sqlx::query_as::<_, ProblemRow>(
+            r#"SELECT p.* FROM problems p
+               INNER JOIN bookmarks b ON p.id = b.problem_id
+               ORDER BY b.created_at DESC"#
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.into_iter().map(|r| r.into()).collect())
+    }
+
+    /// Check if a problem is bookmarked
+    pub async fn is_bookmarked(&self, problem_id: &str) -> Result<bool> {
+        let row: Option<(i64,)> = sqlx::query_as(
+            "SELECT 1 FROM bookmarks WHERE problem_id = ?1"
+        )
+        .bind(problem_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.is_some())
     }
 
     // === Search Operations ===

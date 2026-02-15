@@ -38,7 +38,15 @@ impl BatchProcessor {
     }
     
     /// Start batch OCR job
-    pub async fn start_batch_ocr(&self, book_id: &str, start_page: u32, end_page: u32, chapter_id: &str) -> anyhow::Result<String> {
+    pub async fn start_batch_ocr(
+        &self, 
+        book_id: &str, 
+        start_page: u32, 
+        end_page: u32, 
+        chapter_id: &str,
+        incremental: bool,
+        force: bool,
+    ) -> anyhow::Result<String> {
         let job_id = self.job_manager.create_job(JobType::BatchOcr {
             book_id: book_id.to_string(),
             page_range: (start_page, end_page),
@@ -51,13 +59,13 @@ impl BatchProcessor {
         let chapter_id = chapter_id.to_string();
         
         tokio::spawn(async move {
-            processor.run_batch_ocr(&jid, &book_id, start_page, end_page, &chapter_id).await;
+            processor.run_batch_ocr(&jid, &book_id, start_page, end_page, &chapter_id, incremental, force).await;
         });
         
         Ok(job_id)
     }
     
-    async fn run_batch_ocr(&self, job_id: &str, book_id: &str, start_page: u32, end_page: u32, chapter_id: &str) {
+    async fn run_batch_ocr(&self, job_id: &str, book_id: &str, start_page: u32, end_page: u32, chapter_id: &str, incremental: bool, force: bool) {
         let start_time = std::time::Instant::now();
         let total_pages = end_page - start_page + 1;
         
@@ -98,9 +106,17 @@ impl BatchProcessor {
             let handle = tokio::spawn(async move {
                 let _permit = sem.acquire().await.unwrap();
                 
-                if let Ok(Some(page)) = db.get_page(&book_id, page_num).await {
-                    if page.ocr_text.is_some() && !page.ocr_text.as_ref().unwrap().is_empty() {
-                        return (idx, Some(page.ocr_text.unwrap()));
+                // Check cache unless force=true
+                if !force {
+                    if let Ok(Some(page)) = db.get_page(&book_id, page_num).await {
+                        if page.ocr_text.is_some() && !page.ocr_text.as_ref().unwrap().is_empty() {
+                            // If incremental mode and we have cached OCR, skip this page
+                            if incremental {
+                                log::info!("Skipping page {} (using cached OCR)", page_num);
+                                return (idx, None); // None means skip
+                            }
+                            return (idx, Some(page.ocr_text.unwrap()));
+                        }
                     }
                 }
                 

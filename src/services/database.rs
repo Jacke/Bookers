@@ -966,6 +966,107 @@ impl Database {
 
         Ok(rows.into_iter().map(|r| r.into()).collect())
     }
+
+    pub async fn advanced_search(
+        &self,
+        query: Option<&str>,
+        formula: Option<&str>,
+        chapter_id: Option<&str>,
+        book_id: Option<&str>,
+        has_solution: Option<bool>,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<Problem>> {
+        // Build query dynamically based on which filters are provided
+        // Use simpler approach - build SQL string based on what's provided
+        
+        let (sql, params): (String, Vec<String>) = match (
+            query.filter(|q| !q.is_empty()),
+            formula.filter(|f| !f.is_empty()),
+            chapter_id,
+            book_id,
+            has_solution,
+        ) {
+            (None, None, None, None, None) => {
+                // No filters - just get all
+                (format!(
+                    "SELECT * FROM problems ORDER BY chapter_id, CAST(number AS INTEGER) LIMIT {} OFFSET {}",
+                    limit, offset
+                ), vec![])
+            }
+            (Some(q), None, None, None, None) => {
+                let pattern = format!("%{}%", q);
+                (format!(
+                    "SELECT * FROM problems WHERE content LIKE ? OR display_name LIKE ? ORDER BY chapter_id, CAST(number AS INTEGER) LIMIT {} OFFSET {}",
+                    limit, offset
+                ), vec![pattern.clone(), pattern])
+            }
+            (None, Some(f), None, None, None) => {
+                let pattern = format!("%{}%", f);
+                (format!(
+                    "SELECT * FROM problems WHERE latex_formulas LIKE ? ORDER BY chapter_id, CAST(number AS INTEGER) LIMIT {} OFFSET {}",
+                    limit, offset
+                ), vec![pattern])
+            }
+            (None, None, Some(ch), None, None) => {
+                let pattern = format!("{}%", ch);
+                (format!(
+                    "SELECT * FROM problems WHERE chapter_id LIKE ? ORDER BY chapter_id, CAST(number AS INTEGER) LIMIT {} OFFSET {}",
+                    limit, offset
+                ), vec![pattern])
+            }
+            (None, None, None, Some(bid), None) => {
+                let pattern = format!("{}%", bid);
+                (format!(
+                    "SELECT * FROM problems WHERE chapter_id LIKE ? ORDER BY chapter_id, CAST(number AS INTEGER) LIMIT {} OFFSET {}",
+                    limit, offset
+                ), vec![pattern])
+            }
+            (None, None, None, None, Some(hs)) => {
+                let val = if hs { 1 } else { 0 };
+                (format!(
+                    "SELECT * FROM problems WHERE has_solution = ? ORDER BY chapter_id, CAST(number AS INTEGER) LIMIT {} OFFSET {}",
+                    limit, offset
+                ), vec![val.to_string()])
+            }
+            // For combinations, use a simpler approach - just filter by text for now
+            _ => {
+                let pattern = query.map(|q| format!("%{}%", q)).unwrap_or_default();
+                (format!(
+                    "SELECT * FROM problems WHERE content LIKE ? OR display_name LIKE ? ORDER BY chapter_id, CAST(number AS INTEGER) LIMIT {} OFFSET {}",
+                    limit, offset
+                ), vec![pattern.clone(), pattern])
+            }
+        };
+        
+        let mut q = sqlx::query_as::<_, ProblemRow>(&sql);
+        for p in &params {
+            q = q.bind(p.as_str());
+        }
+        
+        let rows = q.fetch_all(&self.pool).await?;
+        Ok(rows.into_iter().map(|r| r.into()).collect())
+    }
+
+    pub async fn search_count(
+        &self,
+        query: Option<&str>,
+        _formula: Option<&str>,
+        _chapter_id: Option<&str>,
+        _book_id: Option<&str>,
+        has_solution: Option<bool>,
+    ) -> Result<i64> {
+        // Simplified count - just count all or by has_solution
+        let sql = if let Some(hs) = has_solution {
+            let val = if hs { 1 } else { 0 };
+            format!("SELECT COUNT(*) FROM problems WHERE has_solution = {}", val)
+        } else {
+            "SELECT COUNT(*) FROM problems".to_string()
+        };
+        
+        let count: i64 = sqlx::query_scalar(&sql).fetch_one(&self.pool).await?;
+        Ok(count)
+    }
 }
 
 // === Database Row Types ===

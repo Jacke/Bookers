@@ -15,6 +15,10 @@ pub struct BatchOcrRequest {
     pub start_page: u32,
     pub end_page: u32,
     pub chapter_id: String,
+    /// If true, skip pages that already have OCR cached
+    pub incremental: Option<bool>,
+    /// If true, force re-OCR even if cached
+    pub force: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -50,7 +54,10 @@ pub async fn start_batch_ocr(
         Arc::new(config.get_ref().clone()),
     );
     
-    match processor.start_batch_ocr(&body.book_id, body.start_page, body.end_page, &body.chapter_id).await {
+    let incremental = body.incremental.unwrap_or(false);
+    let force = body.force.unwrap_or(false);
+    
+    match processor.start_batch_ocr(&body.book_id, body.start_page, body.end_page, &body.chapter_id, incremental, force).await {
         Ok(job_id) => {
             Ok(HttpResponse::Accepted().json(BatchOcrResponse {
                 job_id,

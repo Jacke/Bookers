@@ -1,5 +1,5 @@
 use actix_web::{web, Error, HttpResponse};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::models::{SolveRequest, SolutionResponse};
 use crate::services::database::Database;
@@ -424,6 +424,73 @@ pub async fn clear_view_history(
             log::error!("Failed to clear view history: {}", e);
             Ok(HttpResponse::InternalServerError().json(serde_json::json!({
                 "error": format!("Failed to clear view history: {}", e)
+            })))
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SearchQuery {
+    q: Option<String>,
+    formula: Option<String>,
+    chapter_id: Option<String>,
+    book_id: Option<String>,
+    has_solution: Option<bool>,
+    limit: Option<usize>,
+    offset: Option<usize>,
+}
+
+#[derive(Serialize)]
+pub struct SearchResponse {
+    problems: Vec<crate::models::Problem>,
+    total: i64,
+    limit: usize,
+    offset: usize,
+}
+
+/// Advanced search for problems
+pub async fn search_problems(
+    query: web::Query<SearchQuery>,
+    db: web::Data<Database>,
+) -> Result<HttpResponse, Error> {
+    let limit = query.limit.unwrap_or(50).min(200);
+    let offset = query.offset.unwrap_or(0);
+    
+    let problems = db.advanced_search(
+        query.q.as_deref(),
+        query.formula.as_deref(),
+        query.chapter_id.as_deref(),
+        query.book_id.as_deref(),
+        query.has_solution,
+        limit,
+        offset,
+    ).await;
+    
+    let total = db.search_count(
+        query.q.as_deref(),
+        query.formula.as_deref(),
+        query.chapter_id.as_deref(),
+        query.book_id.as_deref(),
+        query.has_solution,
+    ).await;
+    
+    match (problems, total) {
+        (Ok(problems), Ok(total)) => Ok(HttpResponse::Ok().json(SearchResponse {
+            problems,
+            total,
+            limit,
+            offset,
+        })),
+        (Err(e), _) => {
+            log::error!("Search failed: {}", e);
+            Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": format!("Search failed: {}", e)
+            })))
+        }
+        (_, Err(e)) => {
+            log::error!("Count failed: {}", e);
+            Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": format!("Count failed: {}", e)
             })))
         }
     }

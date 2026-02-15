@@ -214,6 +214,9 @@ fn configure_routes(cfg: &mut web::ServiceConfig) {
             web::delete().to(handlers::clear_view_history),
         );
     
+    // Search route
+    cfg.route("/api/search", web::get().to(handlers::search_problems));
+    
     // Batch processing routes
     cfg.route("/api/batch/ocr", web::post().to(handlers::start_batch_ocr))
         .route("/api/batch/solve", web::post().to(handlers::start_batch_solve))
